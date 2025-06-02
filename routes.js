@@ -65,15 +65,21 @@ const authenticateToken = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
-  if (!token) return res.status(401).json({ error: 'Authentication token required' });
+  if (!token) {
+    console.error('Authentication token missing');
+    return res.status(401).json({ error: 'Authentication token required' });
+  }
 
   try {
     const decodedToken = await admin.auth().verifyIdToken(token);
     req.user = decodedToken;
     next();
   } catch (error) {
-    console.error('Error verifying token:', error);
-    res.status(403).json({ error: 'Invalid or expired token' });
+    console.error('Error verifying token:', {
+      message: error.message,
+      stack: error.stack,
+    });
+    return res.status(403).json({ error: 'Invalid or expired token' });
   }
 };
 
@@ -81,6 +87,7 @@ const authenticateToken = async (req, res, next) => {
 router.post('/signup', async (req, res) => {
   const { email, password, firstName, lastName } = req.body;
   if (!email || !password || !firstName || !lastName) {
+    console.error('Missing required signup fields:', { email, firstName, lastName });
     return res.status(400).json({ error: 'Email, password, firstName, and lastName required' });
   }
 
@@ -102,7 +109,10 @@ router.post('/signup', async (req, res) => {
 
     res.status(201).json({ uid: userRecord.uid, message: 'User created successfully' });
   } catch (error) {
-    console.error('Error creating user:', error);
+    console.error('Error creating user:', {
+      message: error.message,
+      stack: error.stack,
+    });
     res.status(400).json({ error: error.message });
   }
 });
@@ -110,14 +120,20 @@ router.post('/signup', async (req, res) => {
 // User signin
 router.post('/signin', async (req, res) => {
   const { email, password } = req.body;
-  if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+  if (!email || !password) {
+    console.error('Missing email or password');
+    return res.status(400).json({ error: 'Email and password required' });
+  }
 
   try {
     const user = await admin.auth().getUserByEmail(email);
     const customToken = await admin.auth().createCustomToken(user.uid);
     res.json({ uid: user.uid, customToken, message: 'Use customToken to get ID token via Firebase REST API' });
   } catch (error) {
-    console.error('Error signing in:', error);
+    console.error('Error signing in:', {
+      message: error.message,
+      stack: error.stack,
+    });
     res.status(401).json({ error: 'Invalid credentials' });
   }
 });
@@ -125,14 +141,20 @@ router.post('/signin', async (req, res) => {
 // Forgot password
 router.post('/forgot-password', async (req, res) => {
   const { email } = req.body;
-  if (!email) return res.status(400).json({ error: 'Email required' });
+  if (!email) {
+    console.error('Missing email for password reset');
+    return res.status(400).json({ error: 'Email required' });
+  }
 
   try {
     const link = await admin.auth().generatePasswordResetLink(email);
-    console.log('Password reset link:', link);
+    console.log('Password reset link generated');
     res.json({ message: 'Password reset link sent to email' });
   } catch (error) {
-    console.error('Error generating reset link:', error);
+    console.error('Error generating reset link:', {
+      message: error.message,
+      stack: error.stack,
+    });
     res.status(400).json({ error: error.message });
   }
 });
@@ -140,7 +162,10 @@ router.post('/forgot-password', async (req, res) => {
 // Reset password
 router.post('/reset-password', async (req, res) => {
   const { oobCode, newPassword } = req.body;
-  if (!oobCode || !newPassword) return res.status(400).json({ error: 'Reset code and new password required' });
+  if (!oobCode || !newPassword) {
+    console.error('Missing reset code or new password');
+    return res.status(400).json({ error: 'Reset code and new password required' });
+  }
 
   try {
     const email = await admin.auth().verifyPasswordResetCode(oobCode);
@@ -148,7 +173,10 @@ router.post('/reset-password', async (req, res) => {
     await admin.auth().updateUser(user.uid, { password: newPassword });
     res.json({ message: 'Password reset successfully' });
   } catch (error) {
-    console.error('Error resetting password:', error);
+    console.error('Error resetting password:', {
+      message: error.message,
+      stack: error.stack,
+    });
     res.status(400).json({ error: error.message });
   }
 });
@@ -156,7 +184,10 @@ router.post('/reset-password', async (req, res) => {
 // Chat endpoint with improved program name extraction
 router.post('/chat', authenticateToken, async (req, res) => {
   const { message, sender } = req.body;
-  if (!message || !sender) return res.status(400).json({ error: 'Message and sender are required' });
+  if (!message || !sender) {
+    console.error('Missing message or sender');
+    return res.status(400).json({ error: 'Message and sender are required' });
+  }
 
   try {
     // Extract program name using regex for common prefixes or standalone names
@@ -277,7 +308,10 @@ router.post('/chat', authenticateToken, async (req, res) => {
 
     res.json({ response: responseText });
   } catch (error) {
-    console.error('Error in /chat:', error);
+    console.error('Error in /chat:', {
+      message: error.message,
+      stack: error.stack,
+    });
     res.status(500).json({ error: 'Failed to process message' });
   }
 });
@@ -291,11 +325,15 @@ router.get('/programs', authenticateToken, async (req, res) => {
       programs = snapshot.docs.map(doc => ({ docId: doc.id, ...doc.data() }));
     }
     if (programs.length === 0) {
+      console.error('No programs found in pdfData or Firestore');
       return res.status(404).json({ error: 'No programs found' });
     }
     res.json(programs);
   } catch (error) {
-    console.error('Error fetching programs:', error);
+    console.error('Error fetching programs:', {
+      message: error.message,
+      stack: error.stack,
+    });
     res.status(500).json({ error: 'Failed to fetch programs' });
   }
 });
@@ -311,7 +349,7 @@ router.get('/programs/search', authenticateToken, async (req, res) => {
 
     const { query, college } = req.query;
 
-    if (college) {
+    if (college.length > 0) {
       results = results.filter(p => 
         p.college.toLowerCase().includes(college.toLowerCase())
       );
@@ -324,12 +362,16 @@ router.get('/programs/search', authenticateToken, async (req, res) => {
     }
 
     if (results.length === 0) {
-      return res.status(404).json({ error: 'No programs match the criteria' });
+      console.error('No programs match the criteria:', { query, college });
+      return res.status(404).json({ error: 'No programs found' });
     }
 
     res.json({ results });
   } catch (error) {
-    console.error('Error searching programs:', error);
+    console.error('Error searching programs:', {
+      message: error.message,
+      stack: error.stack,
+    });
     res.status(500).json({ error: 'Failed to search programs' });
   }
 });
@@ -338,18 +380,20 @@ router.get('/programs/search', authenticateToken, async (req, res) => {
 router.post('/recommend', authenticateToken, async (req, res) => {
   const { grades, gender } = req.body;
   if (!grades || typeof grades !== 'object') {
-    return res.status(400).json({ error: 'Valid grades object required' });
+    console.error('Invalid grades object:', { grades });
+    return res.status(400).json({ error: 'Invalid grades object' });
   }
 
   try {
     const aggregate = calculateAggregate(grades);
-    let programs = pdfData?.programs || [];
+    let programs = pdfData?.programs || [] || [];
     if (programs.length === 0) {
       const snapshot = await programsCollection.get();
-      programs = snapshot.docs.map(doc => ({ docId: doc.id, ...doc.data() }));
+      programs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     }
 
     if (programs.length === 0) {
+      console.error('No programs available for recommendation');
       return res.status(404).json({ error: 'No programs found' });
     }
 
@@ -377,7 +421,7 @@ router.post('/recommend', authenticateToken, async (req, res) => {
       .sort((a, b) => Math.abs(a.cutoff - aggregate) - Math.abs(b.cutoff - aggregate));
 
     recommendations = recommendations.filter((rec, index, self) =>
-      index === self.findIndex(r => r.name === rec.name)
+      index === recommendations.findIndex(r => r.name === rec.name)
     );
 
     if (recommendations.length < 4) {
@@ -424,13 +468,19 @@ router.post('/recommend', authenticateToken, async (req, res) => {
 // Calculate aggregate
 router.post('/calculate-aggregate', authenticateToken, async (req, res) => {
   const { grades } = req.body;
-  if (!grades || typeof grades !== 'object') return res.status(400).json({ error: 'Valid grades object required' });
+  if (!grades || typeof grades !== 'object') {
+    console.error('Invalid grades object');
+    return res.status(400).json({ error: 'Valid grades object required' });
+  }
 
   try {
     const aggregate = calculateAggregate(grades);
     res.json({ aggregate });
   } catch (error) {
-    console.error('Error calculating aggregate:', error);
+    console.error('Error calculating aggregate:', {
+      message: error.message,
+      stack: error.stack,
+    });
     res.status(400).json({ error: 'Invalid grades format' });
   }
 });
@@ -442,7 +492,10 @@ router.get('/faqs', authenticateToken, async (req, res) => {
     const faqs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     res.json(faqs);
   } catch (error) {
-    console.error('Error fetching FAQs:', error);
+    console.error('Error fetching FAQs:', {
+      message: error.message,
+      stack: error.stack,
+    });
     res.status(500).json({ error: 'Failed to fetch FAQs' });
   }
 });
@@ -451,10 +504,16 @@ router.get('/faqs', authenticateToken, async (req, res) => {
 router.get('/faq/:id', authenticateToken, async (req, res) => {
   try {
     const doc = await admin.firestore().collection('faqs').doc(req.params.id).get();
-    if (!doc.exists) return res.status(404).json({ error: 'FAQ not found' });
+    if (!doc.exists) {
+      console.error('FAQ not found:', req.params.id);
+      return res.status(404).json({ error: 'FAQ not found' });
+    }
     res.json({ id: doc.id, ...doc.data() });
   } catch (error) {
-    console.error('Error fetching FAQ:', error);
+    console.error('Error fetching FAQ:', {
+      message: error.message,
+      stack: error.stack,
+    });
     res.status(500).json({ error: 'Failed to fetch FAQ' });
   }
 });
@@ -462,7 +521,10 @@ router.get('/faq/:id', authenticateToken, async (req, res) => {
 // Create FAQ
 router.post('/faqs', authenticateToken, async (req, res) => {
   const { question, answer } = req.body;
-  if (!question || !answer) return res.status(400).json({ error: 'Question and answer required' });
+  if (!question || !answer) {
+    console.error('Missing question or answer');
+    return res.status(400).json({ error: 'Question and answer required' });
+  }
 
   try {
     const docRef = await admin.firestore().collection('faqs').add({
@@ -473,7 +535,10 @@ router.post('/faqs', authenticateToken, async (req, res) => {
     });
     res.status(201).json({ id: docRef.id });
   } catch (error) {
-    console.error('Error adding FAQ:', error);
+    console.error('Error adding FAQ:', {
+      message: error.message,
+      stack: error.stack,
+    });
     res.status(500).json({ error: 'Failed to add FAQ' });
   }
 });
@@ -481,12 +546,18 @@ router.post('/faqs', authenticateToken, async (req, res) => {
 // Update FAQ
 router.put('/faqs/:id', authenticateToken, async (req, res) => {
   const { question, answer } = req.body;
-  if (!question && !answer) return res.status(400).json({ error: 'Question or answer required' });
+  if (!question && !answer) {
+    console.error('Missing question and answer');
+    return res.status(400).json({ error: 'Question or answer required' });
+  }
 
   try {
     const docRef = admin.firestore().collection('faqs').doc(req.params.id);
     const doc = await docRef.get();
-    if (!doc.exists) return res.status(404).json({ error: 'FAQ not found' });
+    if (!doc.exists) {
+      console.error('FAQ not found:', req.params.id);
+      return res.status(404).json({ error: 'FAQ not found' });
+    }
 
     const updateData = {};
     if (question) updateData.question = question;
@@ -497,7 +568,10 @@ router.put('/faqs/:id', authenticateToken, async (req, res) => {
 
     res.json({ id: req.params.id, ...updateData });
   } catch (error) {
-    console.error('Error updating FAQ:', error);
+    console.error('Error updating FAQ:', {
+      message: error.message,
+      stack: error.stack,
+    });
     res.status(500).json({ error: 'Failed to update FAQ' });
   }
 });
@@ -507,12 +581,18 @@ router.delete('/faqs/:id', authenticateToken, async (req, res) => {
   try {
     const docRef = admin.firestore().collection('faqs').doc(req.params.id);
     const doc = await docRef.get();
-    if (!doc.exists) return res.status(404).json({ error: 'FAQ not found' });
+    if (!doc.exists) {
+      console.error('FAQ not found:', req.params.id);
+      return res.status(404).json({ error: 'FAQ not found' });
+    }
 
     await docRef.delete();
     res.json({ message: 'FAQ deleted successfully' });
   } catch (error) {
-    console.error('Error deleting FAQ:', error);
+    console.error('Error deleting FAQ:', {
+      message: error.message,
+      stack: error.stack,
+    });
     res.status(500).json({ error: 'Failed to delete FAQ' });
   }
 });
@@ -528,7 +608,10 @@ router.get('/recommendations', authenticateToken, async (req, res) => {
     const recommendations = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     res.json(recommendations);
   } catch (error) {
-    console.error('Error fetching recommendations:', error);
+    console.error('Error fetching recommendations:', {
+      message: error.message,
+      stack: error.stack,
+    });
     res.status(500).json({ error: 'Failed to fetch recommendations' });
   }
 });

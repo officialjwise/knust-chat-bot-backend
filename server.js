@@ -3,15 +3,41 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const admin = require('firebase-admin');
 const { v4: uuidv4 } = require('uuid');
+const swaggerUi = require('swagger-ui-express');
 
 // Load environment variables
 dotenv.config();
 
 // Initialize Firebase
-const serviceAccount = require('./firebase-service-account.json');
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-});
+let serviceAccount;
+try {
+  if (process.env.FIREBASE_CREDENTIALS) {
+    console.log('Attempting to parse FIREBASE_CREDENTIALS from environment');
+    serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIALS);
+  } else {
+    console.log('Falling back to local firebase-service-account.json');
+    serviceAccount = require('./firebase-service-account.json');
+  }
+} catch (error) {
+  console.error('Error loading Firebase credentials:', {
+    message: error.message,
+    stack: error.stack,
+  });
+  throw error;
+}
+
+try {
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+  });
+  console.log('Firebase Admin initialized successfully');
+} catch (error) {
+  console.error('Error initializing Firebase Admin:', {
+    message: error.message,
+    stack: error.stack,
+  });
+  throw error;
+}
 
 const db = admin.firestore();
 const programsCollection = db.collection('programs');
@@ -24,6 +50,10 @@ const routes = require('./routes');
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Load Swagger JSON and setup Swagger UI
+const swaggerDocument = require('./swagger.json');
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 // Function to parse elective requirements properly
 function parseElectiveRequirements(requirements) {
@@ -144,7 +174,10 @@ async function populatePrograms() {
     pdfData.programs = programs;
     console.log(`Stored ${programs.length} programs in Firestore`);
   } catch (error) {
-    console.error('Error populating programs:', error);
+    console.error('Error populating programs:', {
+      message: error.message,
+      stack: error.stack,
+    });
     pdfData.programs = [];
   }
 }
@@ -160,7 +193,10 @@ async function loadProgramsFromFirestore() {
     console.log(`Loaded ${pdfData.programs.length} programs from Firestore`);
     console.log(`pdfData.programs initialized with ${pdfData.programs.length} programs`);
   } catch (error) {
-    console.error('Error loading programs:', error);
+    console.error('Error loading programs:', {
+      message: error.message,
+      stack: error.stack,
+    });
     pdfData.programs = [];
   }
 }
@@ -196,10 +232,12 @@ app.get('/api/program/by-id/:id', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
-  console.log(`API endpoints available at http://localhost:${PORT}/`);
+  console.log(`API endpoints available at http://0.0.0.0:${PORT}/`);
+  console.log(`Swagger UI available at http://0.0.0.0:${PORT}/api-docs`);
 });
+
 // Export for routes.js
 module.exports = {
   parseElectiveRequirements,

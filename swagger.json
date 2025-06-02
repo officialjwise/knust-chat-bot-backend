@@ -1,0 +1,1157 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "KNUST Admissions API",
+    "description": "API for managing user authentication, program information, recommendations, and FAQs for KNUST admissions.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://0.0.0.0:3000",
+      "description": "Local development server"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Error message"
+          }
+        },
+        "required": ["error"]
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "uid": {
+            "type": "string",
+            "description": "Unique user ID"
+          },
+          "message": {
+            "type": "string",
+            "description": "Response message"
+          }
+        },
+        "required": ["uid", "message"]
+      },
+      "SignInResponse": {
+        "type": "object",
+        "properties": {
+          "uid": {
+            "type": "string",
+            "description": "Unique user ID"
+          },
+          "customToken": {
+            "type": "string",
+            "description": "Custom token for Firebase authentication"
+          },
+          "message": {
+            "type": "string",
+            "description": "Response message"
+          }
+        },
+        "required": ["uid", "customToken", "message"]
+      },
+      "Program": {
+        "type": "object",
+        "properties": {
+          "docId": {
+            "type": "string",
+            "description": "Document ID in Firestore"
+          },
+          "name": {
+            "type": "string",
+            "description": "Program name"
+          },
+          "college": {
+            "type": "string",
+            "description": "College offering the program"
+          },
+          "stream": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Program streams (e.g., regular, fee_paying)"
+          },
+          "coreRequirements": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Core subject requirements"
+          },
+          "electiveRequirementsStructured": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": ["required", "choice"]
+                },
+                "subject": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "options": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "nullable": true
+                },
+                "note": {
+                  "type": "string",
+                  "nullable": true
+                }
+              }
+            }
+          },
+          "electiveRequirements": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Flat list of elective requirements"
+          },
+          "electivesCount": {
+            "type": "integer",
+            "description": "Number of electives required"
+          },
+          "cutoffs": {
+            "type": "object",
+            "properties": {
+              "male": {
+                "type": "string",
+                "description": "Cut-off for male applicants"
+              },
+              "female": {
+                "type": "string",
+                "description": "Cut-off for female applicants"
+              }
+            }
+          },
+          "cutoffSource": {
+            "type": "string",
+            "description": "Source of cut-off data"
+          },
+          "fees": {
+            "type": "object",
+            "properties": {
+              "regular_freshers": {
+                "type": "number",
+                "description": "Fees for regular freshers"
+              },
+              "fee_paying_freshers": {
+                "type": "number",
+                "description": "Fees for fee-paying freshers"
+              },
+              "residential_freshers": {
+                "type": "number",
+                "description": "Fees for residential freshers"
+              }
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Program creation timestamp"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Program update timestamp"
+          }
+        },
+        "required": ["name", "college", "stream", "coreRequirements", "electiveRequirementsStructured", "cutoffs", "fees"]
+      },
+      "Grades": {
+        "type": "object",
+        "properties": {
+          "english": {
+            "type": "string",
+            "enum": ["A1", "B2", "B3", "C4", "C5", "C6", "D7", "E8", "F9"]
+          },
+          "math": {
+            "type": "string",
+            "enum": ["A1", "B2", "B3", "C4", "C5", "C6", "D7", "E8", "F9"]
+          },
+          "integratedScience": {
+            "type": "string",
+            "enum": ["A1", "B2", "B3", "C4", "C5", "C6", "D7", "E8", "F9"]
+          },
+          "electives": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "subject": {
+                  "type": "string"
+                },
+                "grade": {
+                  "type": "string",
+                  "enum": ["A1", "B2", "B3", "C4", "C5", "C6", "D7", "E8", "F9"]
+                }
+              }
+            }
+          }
+        },
+        "required": ["english", "math", "integratedScience", "electives"]
+      },
+      "Recommendation": {
+        "type": "object",
+        "properties": {
+          "aggregate": {
+            "type": "integer",
+            "description": "Calculated aggregate score"
+          },
+          "recommendations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Program"
+            },
+            "description": "Recommended programs"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Any warnings about the recommendations"
+          }
+        },
+        "required": ["aggregate", "recommendations"]
+      },
+      "FAQ": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "FAQ document ID"
+          },
+          "question": {
+            "type": "string",
+            "description": "FAQ question"
+          },
+          "answer": {
+            "type": "string",
+            "description": "FAQ answer"
+          },
+          "frequency": {
+            "type": "integer",
+            "description": "Number of times FAQ was accessed"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "FAQ creation timestamp"
+          }
+        },
+        "required": ["question", "answer", "frequency", "timestamp"]
+      }
+    }
+  },
+  "paths": {
+    "/signup": {
+      "post": {
+        "summary": "Create a new user",
+        "tags": ["Authentication"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "password": {
+                    "type": "string"
+                  },
+                  "firstName": {
+                    "type": "string"
+                  },
+                  "lastName": {
+                    "type": "string"
+                  }
+                },
+                "required": ["email", "password", "firstName", "lastName"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "User created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/signin": {
+      "post": {
+        "summary": "Sign in a user",
+        "tags": ["Authentication"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "password": {
+                    "type": "string"
+                  }
+                },
+                "required": ["email", "password"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sign-in successful",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignInResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/forgot-password": {
+      "post": {
+        "summary": "Request a password reset link",
+        "tags": ["Authentication"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  }
+                },
+                "required": ["email"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password reset link sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reset-password": {
+      "post": {
+        "summary": "Reset user password",
+        "tags": ["Authentication"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "oobCode": {
+                    "type": "string",
+                    "description": "One-time password reset code"
+                  },
+                  "newPassword": {
+                    "type": "string",
+                    "description": "New password"
+                  }
+                },
+                "required": ["oobCode", "newPassword"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password reset successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat": {
+      "post": {
+        "summary": "Chat with admissions assistant",
+        "tags": ["Chat"],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "message": {
+                    "type": "string",
+                    "description": "User's question"
+                  },
+                  "sender": {
+                    "type": "string",
+                    "description": "Sender identifier"
+                  }
+                },
+                "required": ["message", "sender"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Chat response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "response": {
+                      "type": "string",
+                      "description": "Assistant's response"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/programs": {
+      "get": {
+        "summary": "Get all programs",
+        "tags": ["Programs"],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of programs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Program"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No programs found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/programs/search": {
+      "get": {
+        "summary": "Search programs by query or college",
+        "tags": ["Programs"],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Program name search query"
+          },
+          {
+            "in": "query",
+            "name": "college",
+            "schema": {
+              "type": "string"
+            },
+            "description": "College name filter"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Filtered programs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Program"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No programs match criteria",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/recommend": {
+      "post": {
+        "summary": "Get program recommendations based on grades",
+        "tags": ["Recommendations"],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "grades": {
+                    "$ref": "#/components/schemas/Grades"
+                  },
+                  "gender": {
+                    "type": "string",
+                    "enum": ["male", "female"],
+                    "description": "Gender for cut-off filtering"
+                  }
+                },
+                "required": ["grades"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Program recommendations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Recommendation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid grades format",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/calculate-aggregate": {
+      "post": {
+        "summary": "Calculate aggregate score from grades",
+        "tags": ["Recommendations"],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "grades": {
+                    "$ref": "#/components/schemas/Grades"
+                  }
+                },
+                "required": ["grades"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Calculated aggregate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "aggregate": {
+                      "type": "integer",
+                      "description": "Calculated aggregate score"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid grades format",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/faqs": {
+      "get": {
+        "summary": "Get top FAQs",
+        "tags": ["FAQs"],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of FAQs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FAQ"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a new FAQ",
+        "tags": ["FAQs"],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "question": {
+                    "type": "string"
+                  },
+                  "answer": {
+                    "type": "string"
+                  }
+                },
+                "required": ["question", "answer"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "FAQ created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "FAQ document ID"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/faq/{id}": {
+      "get": {
+        "summary": "Get a specific FAQ",
+        "tags": ["FAQs"],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "FAQ document ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "FAQ details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FAQ"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FAQ not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Update an FAQ",
+        "tags": ["FAQs"],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "FAQ document ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "question": {
+                    "type": "string"
+                  },
+                  "answer": {
+                    "type": "string"
+                  }
+                },
+                "minProperties": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "FAQ updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FAQ"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FAQ not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete an FAQ",
+        "tags": ["FAQs"],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "FAQ document ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "FAQ deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "description": "Confirmation message"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FAQ not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/recommendations": {
+      "get": {
+        "summary": "Get user recommendations",
+        "tags": ["Recommendations"],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of user recommendations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Recommendation"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health check",
+        "tags": ["Health"],
+        "responses": {
+          "200": {
+            "description": "Server status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "description": "Server status"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "Current timestamp"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
