@@ -1,18 +1,19 @@
-# Node
-node_modules/
-npm-debug.log
-yarn-error.log
-
-# Environment
+# Environment variables
 .env
 .env.local
-.env.development
 .env.production
 
 # Firebase
 firebase-service-account.json
-new-firebase-service-account.json
 
-# Misc
-.DS_Store
-*.pem
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Dependencies
+node_modules/
+
+# IDE
+.vscode/
+.idea/
