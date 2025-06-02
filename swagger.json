@@ -8,7 +8,7 @@
   "servers": [
     {
       "url": "https://knust-chat-bot-backend.onrender.com",
-      "description": "Local development server"
+      "description": "Production server"
     }
   ],
   "components": {
