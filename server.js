@@ -11,13 +11,11 @@ dotenv.config();
 // Initialize Firebase
 let serviceAccount;
 try {
-  if (process.env.FIREBASE_CREDENTIALS) {
-    console.log('Attempting to parse FIREBASE_CREDENTIALS from environment');
-    serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIALS);
-  } else {
-    console.log('Falling back to local firebase-service-account.json');
-    serviceAccount = require('./firebase-service-account.json');
+  if (!process.env.FIREBASE_CREDENTIALS) {
+    throw new Error('FIREBASE_CREDENTIALS environment variable is required');
   }
+  console.log('Parsing FIREBASE_CREDENTIALS from environment');
+  serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIALS);
 } catch (error) {
   console.error('Error loading Firebase credentials:', {
     message: error.message,
