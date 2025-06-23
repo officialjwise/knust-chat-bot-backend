@@ -353,7 +353,12 @@ router.get('/programs', authenticateToken, async (req, res) => {
       console.error('No programs found in pdfData or Firestore');
       return res.status(404).json({ error: 'No programs found' });
     }
-    res.json(programs);
+    res.json(programs.map(p => ({
+      id: p.docId,
+      name: p.name,
+      description: `A program offered by the ${p.college} at KNUST.`,
+      requirements: `${p.coreRequirements.join(', ')}; Electives: ${p.electiveRequirementsStructured.map(e => e.type === 'choice' ? e.note : e.subject).join(', ')}`
+    })));
   } catch (error) {
     console.error('Error fetching programs:', {
       message: error.message,
@@ -391,7 +396,12 @@ router.get('/programs/search', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'No programs found' });
     }
 
-    res.json({ results });
+    res.json({ results: results.map(p => ({
+      id: p.docId,
+      name: p.name,
+      description: `A program offered by the ${p.college} at KNUST.`,
+      requirements: `${p.coreRequirements.join(', ')}; Electives: ${p.electiveRequirementsStructured.map(e => e.type === 'choice' ? e.note : e.subject).join(', ')}`
+    })) });
   } catch (error) {
     console.error('Error searching programs:', {
       message: error.message,
@@ -638,6 +648,139 @@ router.get('/recommendations', authenticateToken, async (req, res) => {
       stack: error.stack,
     });
     res.status(500).json({ error: 'Failed to fetch recommendations' });
+  }
+});
+
+// Saved Programs Endpoints
+router.get('/saved-programs', authenticateToken, async (req, res) => {
+  try {
+    const snapshot = await admin.firestore().collection('savedPrograms')
+      .where('uid', '==', req.user.uid)
+      .orderBy('savedAt', 'desc')
+      .get();
+    const savedPrograms = snapshot.docs.map(doc => ({
+      id: doc.id,
+      programName: doc.data().programName,
+      course: doc.data().course,
+      savedAt: doc.data().savedAt.toDate().toISOString()
+    }));
+    res.json(savedPrograms);
+  } catch (error) {
+    console.error('Error fetching saved programs:', {
+      message: error.message,
+      stack: error.stack,
+    });
+    res.status(500).json({ error: 'Failed to fetch saved programs' });
+  }
+});
+
+router.post('/saved-programs', authenticateToken, async (req, res) => {
+  const { programName, course } = req.body;
+  if (!programName || !course) {
+    console.error('Missing programName or course');
+    return res.status(400).json({ error: 'programName and course required' });
+  }
+
+  try {
+    // Verify program exists
+    const program = (pdfData?.programs || []).find(p => p.name === programName);
+    if (!program) {
+      console.error('Program not found:', programName);
+      return res.status(404).json({ error: 'Program not found' });
+    }
+
+    const docRef = await admin.firestore().collection('savedPrograms').add({
+      uid: req.user.uid,
+      programName,
+      course,
+      savedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    res.status(201).json({ 
+      id: docRef.id, 
+      programName, 
+      course, 
+      savedAt: new Date().toISOString() 
+    });
+  } catch (error) {
+    console.error('Error saving program:', {
+      message: error.message,
+      stack: error.stack,
+    });
+    res.status(500).json({ error: 'Failed to save program' });
+  }
+});
+
+router.delete('/saved-programs/:id', authenticateToken, async (req, res) => {
+  try {
+    const docRef = admin.firestore().collection('savedPrograms').doc(req.params.id);
+    const doc = await docRef.get();
+    if (!doc.exists) {
+      console.error('Saved program not found:', req.params.id);
+      return res.status(404).json({ error: 'Saved program not found' });
+    }
+    if (doc.data().uid !== req.user.uid) {
+      console.error('Unauthorized attempt to delete saved program:', req.params.id);
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    await docRef.delete();
+    res.json({ message: 'Saved program deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting saved program:', {
+      message: error.message,
+      stack: error.stack,
+    });
+    res.status(500).json({ error: 'Failed to delete saved program' });
+  }
+});
+
+// Support Endpoint
+router.post('/support', authenticateToken, async (req, res) => {
+  const { subject, message } = req.body;
+  if (!subject || !message) {
+    console.error('Missing subject or message');
+    return res.status(400).json({ error: 'Subject and message required' });
+  }
+
+  try {
+    await admin.firestore().collection('supportInquiries').add({
+      uid: req.user.uid,
+      subject,
+      message,
+      status: 'open',
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    res.status(201).json({ message: 'Support inquiry submitted successfully' });
+  } catch (error) {
+    console.error('Error submitting support inquiry:', {
+      message: error.message,
+      stack: error.stack,
+    });
+    res.status(500).json({ error: 'Failed to submit support inquiry' });
+  }
+});
+
+// About Endpoint
+router.get('/about', async (req, res) => {
+  try {
+    const aboutData = {
+      appName: 'KNUST Chatbot',
+      version: '1.0.0',
+      description: 'A chatbot application to assist prospective KNUST students with program selection, admissions information, and more.',
+      contact: {
+        email: 'support@knustchatbot.com',
+        phone: '+233 123 456 789',
+        website: 'https://knustchatbot.com'
+      },
+      lastUpdated: '2025-06-23'
+    };
+    res.json(aboutData);
+  } catch (error) {
+    console.error('Error fetching about data:', {
+      message: error.message,
+      stack: error.stack,
+    });
+    res.status(500).json({ error: 'Failed to fetch about data' });
   }
 });
 
