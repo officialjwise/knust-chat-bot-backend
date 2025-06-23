@@ -2,7 +2,7 @@ const express = require('express');
 const admin = require('firebase-admin');
 const { OpenAI } = require('openai');
 const router = express.Router();
-
+const axios = require('axios');
 // Import pdfData from server.js, helpers from utils.js, and validPrograms from data.js
 const { pdfData } = require('./server');
 const { findProgramByName } = require('./utils');
@@ -60,7 +60,10 @@ function matchesElectives(userElectives, programElectives) {
   });
 }
 
-// Authenticate Firebase token
+// Firebase Web API Key (store in environment variables in production)
+const FIREBASE_API_KEY = process.env.FIREBASE_API_KEY || 'AIzaSyBa3Ht1TcWCrUSsN5o3mGhGTVPjjz-8KJU';
+
+// Middleware to authenticate JWT token
 const authenticateToken = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -86,8 +89,9 @@ const authenticateToken = async (req, res, next) => {
 // User signup
 router.post('/signup', async (req, res) => {
   const { email, password, firstName, lastName } = req.body;
+
   if (!email || !password || !firstName || !lastName) {
-    console.error('Missing required signup fields:', { email, firstName, lastName });
+    console.error('Missing required signup fields', { email, firstName, lastName });
     return res.status(400).json({ error: 'Email, password, firstName, and lastName required' });
   }
 
@@ -111,27 +115,47 @@ router.post('/signup', async (req, res) => {
   } catch (error) {
     console.error('Error creating user:', {
       message: error.message,
-      stack: error.stack,
+      code: error.code,
     });
-    res.status(400).json({ error: error.message });
+    res.status(400).json({ error: 'Invalid input' });
   }
 });
 
 // User signin
 router.post('/signin', async (req, res) => {
   const { email, password } = req.body;
+
   if (!email || !password) {
-    console.error('Missing email or password');
+    console.error('Missing email or password', { email });
     return res.status(400).json({ error: 'Email and password required' });
   }
 
   try {
+    // Verify email and password using Firebase Auth REST API
+    const authResponse = await axios.post(
+      `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${FIREBASE_API_KEY}`,
+      {
+        email,
+        password,
+        returnSecureToken: true,
+      }
+    );
+
+    // Get user by email
     const user = await admin.auth().getUserByEmail(email);
+
+    // Create custom token
     const customToken = await admin.auth().createCustomToken(user.uid);
-    res.json({ uid: user.uid, customToken, message: 'Use customToken to get ID token via Firebase REST API' });
+
+    res.json({
+      uid: user.uid,
+      customToken,
+      message: 'Sign-in successful',
+    });
   } catch (error) {
     console.error('Error signing in:', {
       message: error.message,
+      code: error.code,
       stack: error.stack,
     });
     res.status(401).json({ error: 'Invalid credentials' });
@@ -141,27 +165,28 @@ router.post('/signin', async (req, res) => {
 // Forgot password
 router.post('/forgot-password', async (req, res) => {
   const { email } = req.body;
+
   if (!email) {
     console.error('Missing email for password reset');
     return res.status(400).json({ error: 'Email required' });
   }
 
   try {
-    const link = await admin.auth().generatePasswordResetLink(email);
-    console.log('Password reset link generated');
-    res.json({ message: 'Password reset link sent to email' });
+    await admin.auth().generatePasswordResetLink(email);
+    res.json({ message: 'Password reset link sent' });
   } catch (error) {
     console.error('Error generating reset link:', {
       message: error.message,
-      stack: error.stack,
+      code: error.code,
     });
-    res.status(400).json({ error: error.message });
+    res.status(400).json({ error: 'Invalid input' });
   }
 });
 
 // Reset password
 router.post('/reset-password', async (req, res) => {
   const { oobCode, newPassword } = req.body;
+
   if (!oobCode || !newPassword) {
     console.error('Missing reset code or new password');
     return res.status(400).json({ error: 'Reset code and new password required' });
@@ -175,9 +200,9 @@ router.post('/reset-password', async (req, res) => {
   } catch (error) {
     console.error('Error resetting password:', {
       message: error.message,
-      stack: error.stack,
+      code: error.code,
     });
-    res.status(400).json({ error: error.message });
+    res.status(400).json({ error: 'Invalid input' });
   }
 });
 

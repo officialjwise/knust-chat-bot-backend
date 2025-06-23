@@ -1,5 +1,4 @@
 let pdfData = require('./data').pdfData;
-
 function findProgramByName(programName) {
   return pdfData.programs.find(program => 
     program.name.toLowerCase() === programName.toLowerCase()

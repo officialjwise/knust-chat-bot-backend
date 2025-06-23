@@ -137,7 +137,7 @@ const app = express();
 // Enhanced CORS configuration for production
 const corsOptions = {
   origin: process.env.NODE_ENV === 'production' 
-    ? ['https://your-frontend-domain.com', 'https://www.your-frontend-domain.com']
+    ? ['#', '#']
     : true,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -390,6 +390,39 @@ app.get('/api/program/by-name/:name', (req, res) => {
   } catch (error) {
     console.error('Error in /api/program/by-name:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Logout endpoint
+app.post('/api/logout', async (req, res) => {
+  try {
+    const { idToken } = req.body;
+    
+    // If no token provided, return success anyway
+    if (!idToken) {
+      return res.json({ success: true, message: 'Logged out successfully' });
+    }
+    
+    // If Firebase is initialized, try to revoke the token
+    if (db) {
+      try {
+        // Verify the ID token first to get the user ID
+        const decodedToken = await admin.auth().verifyIdToken(idToken);
+        const uid = decodedToken.uid;
+        
+        // Revoke refresh tokens for the user
+        await admin.auth().revokeRefreshTokens(uid);
+        console.log(`Tokens revoked for user: ${uid}`);
+      } catch (firebaseError) {
+        console.warn('Error revoking token:', firebaseError.message);
+        // Continue and return success even if revocation fails
+      }
+    }
+    
+    res.json({ success: true, message: 'Logged out successfully' });
+  } catch (error) {
+    console.error('Error in logout endpoint:', error);
+    res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 
