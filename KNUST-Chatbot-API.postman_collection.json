@@ -1,0 +1,1373 @@
+{
+  "info": {
+    "name": "KNUST Chatbot API",
+    "description": "Complete API collection for KNUST Chatbot Backend with authentication and all endpoints",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "12345678-1234-1234-1234-123456789012",
+    "version": {
+      "major": 1,
+      "minor": 0,
+      "patch": 0
+    }
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{idToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "firebaseApiKey",
+      "value": "AIzaSyBa3Ht1TcWCrUSsN5o3mGhGTVPjjz-8KJU",
+      "type": "string"
+    },
+    {
+      "key": "idToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refreshToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "customToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "testEmail",
+      "value": "officialjwise20@gmail.com",
+      "type": "string"
+    },
+    {
+      "key": "testPassword",
+      "value": "Amoako@21",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "1. Sign Up",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 or 400 (if user exists)\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 400]);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    pm.test(\"Response has idToken\", function () {",
+                  "        pm.expect(response.idToken).to.exist;",
+                  "    });",
+                  "    ",
+                  "    if (response.idToken) {",
+                  "        pm.collectionVariables.set(\"idToken\", response.idToken);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"{{testPassword}}\",\n  \"firstName\": \"John\",\n  \"lastName\": \"Wise\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/signup",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "signup"
+              ]
+            },
+            "description": "Sign up a new user. Will return 400 if user already exists."
+          }
+        },
+        {
+          "name": "2. Sign In (Primary Method)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const response = pm.response.json();",
+                  "",
+                  "pm.test(\"Response has idToken\", function () {",
+                  "    pm.expect(response.idToken).to.exist;",
+                  "});",
+                  "",
+                  "pm.test(\"Response has refreshToken\", function () {",
+                  "    pm.expect(response.refreshToken).to.exist;",
+                  "});",
+                  "",
+                  "// Store tokens for use in other requests",
+                  "pm.collectionVariables.set(\"idToken\", response.idToken);",
+                  "pm.collectionVariables.set(\"refreshToken\", response.refreshToken);",
+                  "",
+                  "console.log(\"ID Token stored:\", response.idToken.substring(0, 50) + \"...\");"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"{{testPassword}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/signin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "signin"
+              ]
+            },
+            "description": "Sign in with email and password to get ID token and refresh token."
+          }
+        },
+        {
+          "name": "3. Exchange Custom Token for ID Token",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// This assumes you have a custom token from your backend",
+                  "// In a real scenario, you'd get this from your backend first"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const response = pm.response.json();",
+                  "",
+                  "pm.test(\"Response has idToken\", function () {",
+                  "    pm.expect(response.idToken).to.exist;",
+                  "});",
+                  "",
+                  "pm.test(\"Response has refreshToken\", function () {",
+                  "    pm.expect(response.refreshToken).to.exist;",
+                  "});",
+                  "",
+                  "// Store tokens",
+                  "pm.collectionVariables.set(\"idToken\", response.idToken);",
+                  "pm.collectionVariables.set(\"refreshToken\", response.refreshToken);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{customToken}}\",\n  \"returnSecureToken\": true\n}"
+            },
+            "url": {
+              "raw": "https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key={{firebaseApiKey}}",
+              "protocol": "https",
+              "host": [
+                "identitytoolkit",
+                "googleapis",
+                "com"
+              ],
+              "path": [
+                "v1",
+                "accounts:signInWithCustomToken"
+              ],
+              "query": [
+                {
+                  "key": "key",
+                  "value": "{{firebaseApiKey}}"
+                }
+              ]
+            },
+            "description": "Exchange a custom token for an ID token using Firebase REST API."
+          }
+        },
+        {
+          "name": "4. Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const response = pm.response.json();",
+                  "",
+                  "pm.test(\"Response has id_token\", function () {",
+                  "    pm.expect(response.id_token).to.exist;",
+                  "});",
+                  "",
+                  "// Update stored token",
+                  "pm.collectionVariables.set(\"idToken\", response.id_token);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"grant_type\": \"refresh_token\",\n  \"refresh_token\": \"{{refreshToken}}\"\n}"
+            },
+            "url": {
+              "raw": "https://securetoken.googleapis.com/v1/token?key={{firebaseApiKey}}",
+              "protocol": "https",
+              "host": [
+                "securetoken",
+                "googleapis",
+                "com"
+              ],
+              "path": [
+                "v1",
+                "token"
+              ],
+              "query": [
+                {
+                  "key": "key",
+                  "value": "{{firebaseApiKey}}"
+                }
+              ]
+            },
+            "description": "Refresh the ID token using the refresh token."
+          }
+        },
+        {
+          "name": "5. Logout",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Logout successful\", function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.expect(response.success).to.be.true;",
+                  "});",
+                  "",
+                  "// Clear stored tokens",
+                  "pm.collectionVariables.set(\"idToken\", \"\");",
+                  "pm.collectionVariables.set(\"refreshToken\", \"\");"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{idToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idToken\": \"{{idToken}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "logout"
+              ]
+            },
+            "description": "Logout and revoke tokens."
+          }
+        }
+      ],
+      "description": "Authentication endpoints for user management"
+    },
+    {
+      "name": "Chat & AI",
+      "item": [
+        {
+          "name": "1. Chat - Program Cut-off Query",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response contains answer\", function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.expect(response.response).to.exist;",
+                  "    pm.expect(response.response).to.be.a('string');",
+                  "    pm.expect(response.response.length).to.be.greaterThan(0);",
+                  "});",
+                  "",
+                  "pm.test(\"Response contains program-specific information\", function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.expect(response.response.toLowerCase()).to.include('computer science');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{idToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What is the cut-off for BSc Computer Science?\",\n  \"sender\": \"user\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/chat",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chat"
+              ]
+            },
+            "description": "Test chat with specific program cut-off query"
+          }
+        },
+        {
+          "name": "2. Chat - Program Fees Query",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response contains fees information\", function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.expect(response.response.toLowerCase()).to.include('fee');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{idToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"How much are the fees for BSc Petroleum Engineering?\",\n  \"sender\": \"user\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/chat",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chat"
+              ]
+            },
+            "description": "Test chat with program fees query"
+          }
+        },
+        {
+          "name": "3. Chat - Requirements Query",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response contains requirements information\", function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.expect(response.response.toLowerCase()).to.include('subject');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{idToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What are the admission requirements for BSc Civil Engineering?\",\n  \"sender\": \"user\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/chat",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chat"
+              ]
+            },
+            "description": "Test chat with program requirements query"
+          }
+        },
+        {
+          "name": "4. Chat - Fuzzy Program Name",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response handles fuzzy matching\", function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.expect(response.response).to.exist;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{idToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Tell me about computer science program\",\n  \"sender\": \"user\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/chat",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chat"
+              ]
+            },
+            "description": "Test fuzzy program name matching"
+          }
+        },
+        {
+          "name": "5. Chat - Eligibility Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response contains eligibility information\", function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.expect(response.response.toLowerCase()).to.include('science');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{idToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"I studied General Science, can I pursue BSc Computer Science?\",\n  \"sender\": \"user\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/chat",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chat"
+              ]
+            },
+            "description": "Test eligibility checking based on background"
+          }
+        },
+        {
+          "name": "6. Chat - Similar Programs",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response contains similar programs\", function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.expect(response.response.toLowerCase()).to.include('similar');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{idToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What programs are similar to BSc Computer Science?\",\n  \"sender\": \"user\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/chat",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chat"
+              ]
+            },
+            "description": "Test similar program recommendations"
+          }
+        },
+        {
+          "name": "7. Chat - Non-admission Query",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response contains creator information\", function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.expect(response.response.toLowerCase()).to.include('rockson agyamaku');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{idToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Who created you?\",\n  \"sender\": \"user\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/chat",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chat"
+              ]
+            },
+            "description": "Test non-admission hardcoded responses"
+          }
+        },
+        {
+          "name": "8. Chat - Greeting",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response contains greeting\", function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.expect(response.response.toLowerCase()).to.include('hello');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{idToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Hello\",\n  \"sender\": \"user\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/chat",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chat"
+              ]
+            },
+            "description": "Test greeting responses"
+          }
+        },
+        {
+          "name": "9. Test Fuzzy Search",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response contains fuzzy search results\", function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.expect(response.fuzzyResults).to.exist;",
+                  "    pm.expect(response.extractedProgram).to.exist;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{idToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/test-fuzzy-search/computer science",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "test-fuzzy-search",
+                "computer science"
+              ]
+            },
+            "description": "Test the fuzzy search functionality"
+          }
+        }
+      ],
+      "description": "Chat and AI-related endpoints"
+    },
+    {
+      "name": "Programs & Data",
+      "item": [
+        {
+          "name": "1. Get All Programs",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response contains programs array\", function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.expect(response).to.be.an('array');",
+                  "});",
+                  "",
+                  "pm.test(\"Programs have required fields\", function () {",
+                  "    const response = pm.response.json();",
+                  "    if (response.length > 0) {",
+                  "        const program = response[0];",
+                  "        pm.expect(program.name).to.exist;",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{idToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/programs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "programs"
+              ]
+            },
+            "description": "Get all available programs"
+          }
+        },
+        {
+          "name": "2. Get Program by ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 or 404\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 404]);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "    pm.test(\"Response contains program data\", function () {",
+                  "        const response = pm.response.json();",
+                  "        pm.expect(response.name).to.exist;",
+                  "    });",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{idToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/program/by-id/test-program-id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "program",
+                "by-id",
+                "test-program-id"
+              ]
+            },
+            "description": "Get a specific program by ID"
+          }
+        },
+        {
+          "name": "3. Get Colleges",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response contains colleges\", function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.expect(response).to.be.an('object');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{idToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/colleges",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "colleges"
+              ]
+            },
+            "description": "Get all colleges and their programs"
+          }
+        },
+        {
+          "name": "4. Search Programs",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response contains search results\", function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.expect(response).to.be.an('array');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{idToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/search?q=engineering&cutoff=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "engineering"
+                },
+                {
+                  "key": "cutoff",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Search programs with filters"
+          }
+        }
+      ],
+      "description": "Program and data management endpoints"
+    },
+    {
+      "name": "User Management",
+      "item": [
+        {
+          "name": "1. Get Profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response contains profile data\", function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.expect(response.profile).to.exist;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{idToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "profile"
+              ]
+            },
+            "description": "Get user profile information"
+          }
+        },
+        {
+          "name": "2. Update Profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Profile updated successfully\", function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.expect(response.success).to.be.true;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{idToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"John\",\n  \"lastName\": \"Wise\",\n  \"phone\": \"+233123456789\",\n  \"dateOfBirth\": \"1995-05-15\",\n  \"gender\": \"male\",\n  \"nationality\": \"Ghanaian\",\n  \"region\": \"Greater Accra\",\n  \"shsAttended\": \"Achimota School\",\n  \"shsProgram\": \"General Science\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "profile"
+              ]
+            },
+            "description": "Update user profile information"
+          }
+        },
+        {
+          "name": "3. Calculate Aggregate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response contains aggregate calculation\", function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.expect(response.aggregate).to.exist;",
+                  "    pm.expect(response.aggregate).to.be.a('number');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{idToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"english\": \"B3\",\n  \"math\": \"B2\",\n  \"integratedScience\": \"B3\",\n  \"electives\": [\n    { \"subject\": \"Physics\", \"grade\": \"A1\" },\n    { \"subject\": \"Chemistry\", \"grade\": \"B2\" },\n    { \"subject\": \"Mathematics\", \"grade\": \"B3\" }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/calculate-aggregate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "calculate-aggregate"
+              ]
+            },
+            "description": "Calculate WASSCE aggregate score"
+          }
+        },
+        {
+          "name": "4. Get Eligible Programs",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response contains eligible programs\", function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.expect(response.eligiblePrograms).to.exist;",
+                  "    pm.expect(response.eligiblePrograms).to.be.an('array');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{idToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"english\": \"B3\",\n  \"math\": \"B2\",\n  \"integratedScience\": \"B3\",\n  \"electives\": [\n    { \"subject\": \"Physics\", \"grade\": \"A1\" },\n    { \"subject\": \"Chemistry\", \"grade\": \"B2\" },\n    { \"subject\": \"Mathematics\", \"grade\": \"B3\" }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/check-eligibility",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "check-eligibility"
+              ]
+            },
+            "description": "Check which programs the user is eligible for"
+          }
+        }
+      ],
+      "description": "User profile and eligibility endpoints"
+    },
+    {
+      "name": "System & Health",
+      "item": [
+        {
+          "name": "1. Health Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Server is healthy\", function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.expect(response.status).to.equal('healthy');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Check server health status"
+          }
+        },
+        {
+          "name": "2. API Documentation",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response is HTML\", function () {",
+                  "    pm.expect(pm.response.headers.get('content-type')).to.include('text/html');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api-docs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api-docs"
+              ]
+            },
+            "description": "Access Swagger API documentation"
+          }
+        }
+      ],
+      "description": "System health and documentation endpoints"
+    }
+  ]
+}

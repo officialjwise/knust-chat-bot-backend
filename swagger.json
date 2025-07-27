@@ -1,14 +1,22 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "KNUST Admissions API",
-    "description": "API for managing user authentication, program information, recommendations, and FAQs for KNUST admissions.",
-    "version": "1.0.0"
+    "title": "KNUST Chatbot API - Enhanced Version",
+    "description": "Enhanced API for KNUST admission chatbot with fuzzy search, dataset-scoped responses, and intelligent program matching. This API provides accurate admission information including cut-offs, fees, requirements, and eligibility checking.\n\n## 🚀 New Features\n\n### Dataset-Only Responses\n- All admission-related queries use only official KNUST data\n- No external university information or general knowledge\n- Accurate cut-offs, fees, and requirements\n\n### Fuzzy Search\n- Intelligent program name matching\n- Handles typos and partial names\n- Automatic program suggestions\n\n### Enhanced Chat Experience\n- Eligibility checking based on SHS background\n- Similar program recommendations\n- Auto-append admission requirements\n- Hardcoded responses for non-admission queries\n\n### Testing & Debugging\n- Fuzzy search test endpoint\n- Query classification testing\n- Development-friendly features",
+    "version": "2.0.0",
+    "contact": {
+      "name": "Rockson Agyamaku",
+      "email": "support@knustchatbot.com"
+    }
   },
   "servers": [
     {
       "url": "https://knust-chat-bot-backend.onrender.com",
       "description": "Production server"
+    },
+    {
+      "url": "http://localhost:3000",
+      "description": "Development server"
     }
   ],
   "components": {
@@ -259,6 +267,84 @@
           }
         },
         "required": ["question", "answer", "frequency", "timestamp"]
+      },
+      "ChatResponse": {
+        "type": "object",
+        "properties": {
+          "response": {
+            "type": "string",
+            "description": "Chatbot response with admission information"
+          }
+        },
+        "required": ["response"]
+      },
+      "FuzzySearchResult": {
+        "type": "object",
+        "properties": {
+          "program": {
+            "type": "string",
+            "description": "Program name"
+          },
+          "score": {
+            "type": "number",
+            "description": "Match confidence score (lower is better)"
+          }
+        },
+        "required": ["program", "score"]
+      },
+      "FuzzySearchTestResponse": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Original search query"
+          },
+          "fuzzyResults": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FuzzySearchResult"
+            },
+            "description": "Fuzzy search results"
+          },
+          "extractedProgram": {
+            "type": "string",
+            "nullable": true,
+            "description": "Best extracted program name"
+          },
+          "suggestions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Program suggestions for ambiguous queries"
+          },
+          "isAdmissionQuery": {
+            "type": "boolean",
+            "description": "Whether query is admission-related"
+          },
+          "nonAdmissionResponse": {
+            "type": "string",
+            "nullable": true,
+            "description": "Hardcoded response for non-admission queries"
+          }
+        },
+        "required": ["query", "fuzzyResults", "extractedProgram", "suggestions", "isAdmissionQuery", "nonAdmissionResponse"]
+      },
+      "ChatMessage": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "User message to the chatbot",
+            "example": "What is the cut off for BSc Computer Science?"
+          },
+          "sender": {
+            "type": "string",
+            "description": "Message sender identifier",
+            "example": "user"
+          }
+        },
+        "required": ["message", "sender"]
       }
     }
   },
@@ -471,7 +557,8 @@
     },
     "/chat": {
       "post": {
-        "summary": "Chat with admissions assistant",
+        "summary": "Enhanced Chat with KNUST Admissions Assistant",
+        "description": "Chat endpoint with fuzzy search, dataset-scoped responses, and intelligent program matching. Features include: automatic program name extraction, fuzzy search for typos, dataset-only responses for admission queries, eligibility checking, and similar program recommendations.",
         "tags": ["Chat"],
         "security": [
           {
@@ -483,33 +570,66 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "properties": {
-                  "message": {
-                    "type": "string",
-                    "description": "User's question"
-                  },
-                  "sender": {
-                    "type": "string",
-                    "description": "Sender identifier"
+                "$ref": "#/components/schemas/ChatMessage"
+              },
+              "examples": {
+                "cut-off-query": {
+                  "summary": "Cut-off point query",
+                  "value": {
+                    "message": "What is the cut off for BSc Computer Science?",
+                    "sender": "user"
                   }
                 },
-                "required": ["message", "sender"]
+                "fuzzy-search": {
+                  "summary": "Fuzzy search example",
+                  "value": {
+                    "message": "Tell me about petroleum engineering fees",
+                    "sender": "user"
+                  }
+                },
+                "eligibility-check": {
+                  "summary": "Eligibility checking",
+                  "value": {
+                    "message": "Can I pursue Computer Science with General Arts background?",
+                    "sender": "user"
+                  }
+                },
+                "similarity-query": {
+                  "summary": "Similar programs query",
+                  "value": {
+                    "message": "Programs similar to BSc Civil Engineering",
+                    "sender": "user"
+                  }
+                }
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Chat response",
+            "description": "Enhanced chat response with dataset-scoped information",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "response": {
-                      "type": "string",
-                      "description": "Assistant's response"
+                  "$ref": "#/components/schemas/ChatResponse"
+                },
+                "examples": {
+                  "dataset-response": {
+                    "summary": "Dataset-only response",
+                    "value": {
+                      "response": "**BSc Computer Science**\\n\\n🎯 **Cut-off Point:** 7\\n🏫 **College:** College of Science\\n\\n📚 **Required SHS Subjects:**\\n• Physics\\n• Mathematics\\n• Choose one: Chemistry OR Applied Electricity OR Electronics"
+                    }
+                  },
+                  "multiple-suggestions": {
+                    "summary": "Multiple program suggestions",
+                    "value": {
+                      "response": "I found multiple programs that might match your query. Did you mean one of these?\\n\\n1. BSc Computer Science\\n2. BSc Computer Engineering\\n\\nPlease specify which program you're interested in."
+                    }
+                  },
+                  "eligibility-response": {
+                    "summary": "Eligibility check with requirements",
+                    "value": {
+                      "response": "Unfortunately, BSc Computer Science requires specific science subjects that are typically not available in General Arts.\\n\\n📋 **BSc Computer Science - Admission Details:**\\n🎯 **Cut-off Point:** 7\\n🏫 **College:** College of Science\\n📚 **Required SHS Subjects:**\\n• Physics\\n• Mathematics\\n• Choose one: Chemistry OR Applied Electricity OR Electronics"
                     }
                   }
                 }
@@ -538,6 +658,16 @@
           },
           "403": {
             "description": "Invalid or expired token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error with helpful fallback message",
             "content": {
               "application/json": {
                 "schema": {
@@ -1152,6 +1282,151 @@
           }
         }
       }
+    },
+    "/test-fuzzy-search/{query}": {
+      "get": {
+        "summary": "Test Fuzzy Search Functionality",
+        "description": "Test endpoint to demonstrate fuzzy search, program extraction, and query classification. Useful for debugging and testing the enhanced chatbot capabilities.",
+        "tags": ["Testing"],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "query",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Search query to test",
+            "examples": {
+              "program-search": {
+                "summary": "Program search",
+                "value": "computer science"
+              },
+              "partial-name": {
+                "summary": "Partial program name",
+                "value": "petroleum"
+              },
+              "typo-example": {
+                "summary": "Query with typos",
+                "value": "civil eng"
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fuzzy search test results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FuzzySearchTestResponse"
+                },
+                "examples": {
+                  "successful-match": {
+                    "summary": "Successful program match",
+                    "value": {
+                      "query": "computer science",
+                      "fuzzyResults": [
+                        {
+                          "program": "BSc Computer Science",
+                          "score": 0.156
+                        },
+                        {
+                          "program": "BSc Computer Engineering",
+                          "score": 0.548
+                        }
+                      ],
+                      "extractedProgram": "BSc Computer Science",
+                      "suggestions": [],
+                      "isAdmissionQuery": true,
+                      "nonAdmissionResponse": null
+                    }
+                  },
+                  "multiple-suggestions": {
+                    "summary": "Multiple program suggestions",
+                    "value": {
+                      "query": "engineering",
+                      "fuzzyResults": [
+                        {
+                          "program": "BSc Civil Engineering",
+                          "score": 0.156
+                        },
+                        {
+                          "program": "BSc Chemical Engineering",
+                          "score": 0.234
+                        }
+                      ],
+                      "extractedProgram": null,
+                      "suggestions": [
+                        "BSc Civil Engineering",
+                        "BSc Chemical Engineering",
+                        "BSc Mechanical Engineering"
+                      ],
+                      "isAdmissionQuery": true,
+                      "nonAdmissionResponse": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Test failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
-  }
+  },
+  "tags": [
+    {
+      "name": "Authentication",
+      "description": "User authentication and account management endpoints"
+    },
+    {
+      "name": "Chat",
+      "description": "Enhanced chatbot endpoints with fuzzy search and dataset-scoped responses"
+    },
+    {
+      "name": "Programs",
+      "description": "KNUST program information and management"
+    },
+    {
+      "name": "Recommendations",
+      "description": "Program recommendations and eligibility checking"
+    },
+    {
+      "name": "FAQs",
+      "description": "Frequently asked questions management"
+    },
+    {
+      "name": "Health",
+      "description": "System health and status monitoring"
+    },
+    {
+      "name": "Testing",
+      "description": "Testing and debugging endpoints for development"
+    }
+  ]
 }
