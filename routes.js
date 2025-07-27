@@ -7,6 +7,21 @@ const axios = require('axios');
 const { pdfData } = require('./server');
 const { findProgramByName } = require('./utils');
 const { validPrograms } = require('./data');
+// Import new chatbot utilities
+const {
+    isAdmissionQuery,
+    isCareerAcademicQuery,
+    checkNonAdmissionQuery,
+    fuzzySearchPrograms,
+    findProgramWithFuzzySearch,
+    suggestProgramMatches,
+    extractProgramName,
+    getProgramData,
+    findSimilarPrograms,
+    generateDatasetResponse,
+    checkEligibilityByBackground,
+    appendAdmissionRequirements
+} = require('./chatbot-utils');
 
 const programsCollection = admin.firestore().collection('programs');
 
@@ -172,14 +187,32 @@ router.post('/forgot-password', async (req, res) => {
   }
 
   try {
-    await admin.auth().generatePasswordResetLink(email);
-    res.json({ message: 'Password reset link sent' });
+    // Generate password reset link (this will send email automatically if configured)
+    const link = await admin.auth().generatePasswordResetLink(email);
+    
+    // For development, you might want to log the link
+    if (process.env.NODE_ENV === 'development') {
+      console.log('Password reset link generated:', link);
+    }
+    
+    res.json({ 
+      message: 'Password reset email sent successfully. Please check your inbox.',
+      ...(process.env.NODE_ENV === 'development' && { resetLink: link })
+    });
   } catch (error) {
     console.error('Error generating reset link:', {
       message: error.message,
       code: error.code,
     });
-    res.status(400).json({ error: 'Invalid input' });
+    
+    // Provide more specific error messages
+    if (error.code === 'auth/user-not-found') {
+      return res.status(404).json({ error: 'No user found with this email address' });
+    } else if (error.code === 'auth/invalid-email') {
+      return res.status(400).json({ error: 'Invalid email address' });
+    }
+    
+    res.status(400).json({ error: 'Failed to send password reset email' });
   }
 });
 
@@ -206,8 +239,8 @@ router.post('/reset-password', async (req, res) => {
   }
 });
 
-// Chat endpoint with improved program name extraction
-router.post('/chat', authenticateToken, async (req, res) => {
+// Enhanced Chat endpoint with dataset-scoped responses
+router.post('/chat', authenticateToken, ensureDatasetOnly, async (req, res) => {
   const { message, sender } = req.body;
   if (!message || !sender) {
     console.error('Missing message or sender');
@@ -215,113 +248,227 @@ router.post('/chat', authenticateToken, async (req, res) => {
   }
 
   try {
-    // Extract program name using regex for common prefixes or standalone names
-    let programName = message.match(/(BSc|BA|BFA|BEd|LLB|PharmD|DVM|BDS|BHM|Doctor of)\s+[\w\s\/\(\)]+|LLB/i)?.[0]?.trim();
+    // Step 1: Check for non-admission queries first
+    const nonAdmissionResponse = checkNonAdmissionQuery(message);
+    if (nonAdmissionResponse) {        await admin.firestore().collection('faqs').add({
+          question: message,
+          answer: nonAdmissionResponse,
+          frequency: 1,
+          timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        
+        // Save to chat history
+        await saveChatMessage(req.user.uid, message, nonAdmissionResponse);
+        
+        return res.json({ response: nonAdmissionResponse });
+    }
 
-    // Fallback: Match any potential program name against validPrograms
-    if (!programName) {
-      const words = message.toLowerCase().split(/\s+/);
-      for (let i = 1; i < words.length; i++) {
-        const potentialName = words.slice(i).join(' ').trim();
-        const match = validPrograms.find(p => p.toLowerCase().includes(potentialName));
-        if (match) {
-          programName = match;
-          break;
+    // Step 2: Check if this is a career/academic query (not admission-related)
+    const isCareerAcademic = isCareerAcademicQuery(message);
+    console.log('Is career/academic query:', isCareerAcademic);
+
+    // Step 3: Extract program name using fuzzy search
+    const extractedProgram = extractProgramName(message);
+    console.log('Extracted program:', extractedProgram);
+
+    // Step 4: Check if this is an admission-related query
+    const isAdmissionRelated = isAdmissionQuery(message);
+    console.log('Is admission related:', isAdmissionRelated);
+
+    // Step 5: Handle career/academic queries about specific programs
+    if (extractedProgram && isCareerAcademic) {
+        console.log('Processing career/academic query about', extractedProgram);
+        
+        // Use GPT to answer career/academic questions with program context
+        const completion = await openai.chat.completions.create({
+            model: 'gpt-3.5-turbo',
+            messages: [
+                {
+                    role: 'system',
+                    content: `You are a knowledgeable academic advisor for KNUST. The user is asking about career opportunities, job prospects, or academic content related to ${extractedProgram}. Provide helpful, informative responses about:
+                    - Career opportunities and job prospects
+                    - Skills and knowledge gained from the program
+                    - Industries and sectors graduates work in
+                    - General academic content and what students learn
+                    
+                    Keep responses informative but concise. Focus on real-world applications and career paths.`
+                },
+                { role: 'user', content: message }
+            ],
+            temperature: 0.7,
+            max_tokens: 400
+        });
+
+        const response = completion.choices[0].message.content;
+        
+        await admin.firestore().collection('faqs').add({
+            question: message,
+            answer: response,
+            frequency: 1,
+            timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        
+        // Save to chat history
+        await saveChatMessage(req.user.uid, message, response);
+        
+        return res.json({ response });
+    }
+
+    // Step 6: Handle program-specific admission queries
+    // Step 6: Handle program-specific admission queries
+    if (extractedProgram && isAdmissionRelated) {
+      console.log('Processing program-specific admission query');
+      const programData = getProgramData(extractedProgram);
+      console.log('Program data found:', !!programData);
+      
+      if (programData) {
+        // Generate response directly from dataset for admission queries
+        let response = generateDatasetResponse(message, programData);
+        console.log('Generated dataset response length:', response.length);
+        
+        // Add similar programs for recommendation queries
+        const lowerMessage = message.toLowerCase();
+        if (lowerMessage.includes('similar') || lowerMessage.includes('recommend') || lowerMessage.includes('like')) {
+          const similarPrograms = findSimilarPrograms(programData.cutoff, 3, 4, extractedProgram);
+          if (similarPrograms.length > 0) {
+            response += `\n\n🔍 **Similar Programs (Cut-off ±3):**\n`;
+            similarPrograms.forEach(program => {
+              const programCutoff = getProgramData(program)?.cutoff;
+              const cutoffText = programCutoff ? ` (Cut-off: ${programCutoff})` : '';
+              response += `• ${program}${cutoffText}\n`;
+            });
+          }
         }
+        
+        // Check for eligibility questions
+        if (lowerMessage.includes('can i pursue') || lowerMessage.includes('can i study') || lowerMessage.includes('eligible')) {
+          const backgroundMatch = message.match(/(general arts|business|science|visual arts|home economics|technical|vocational)/i);
+          if (backgroundMatch) {
+            const eligibility = checkEligibilityByBackground(backgroundMatch[0], extractedProgram);
+            if (eligibility) {
+              response += `\n\n✅ **Eligibility Check:**\n`;
+              response += eligibility.eligible 
+                ? `Yes, you can pursue this program with your ${backgroundMatch[0]} background.\n`
+                : `Your ${backgroundMatch[0]} background may not meet the specific subject requirements.\n`;
+              
+              response += `\n📚 **Required Subjects:**\n`;
+              eligibility.requirements.forEach(req => {
+                if (typeof req === 'string') {
+                  response += `• ${req}\n`;
+                } else if (Array.isArray(req)) {
+                  response += `• Choose one: ${req.join(' OR ')}\n`;
+                }
+              });
+            }
+          }
+        }
+        
+        await admin.firestore().collection('faqs').add({
+          question: message,
+          answer: response,
+          frequency: 1,
+          timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        
+        // Save to chat history
+        await saveChatMessage(req.user.uid, message, response);
+        
+        return res.json({ response });
       }
     }
 
-    // Normalize specific cases
-    if (programName) {
-      const lowerName = programName.toLowerCase();
-      if (lowerName.includes('biological science')) {
-        programName = 'BSc Biological Sciences';
-      } else if (lowerName.includes('optometry')) {
-        programName = 'Doctor of Optometry';
-      } else if (lowerName.includes('law') || lowerName === 'llb') {
-        programName = 'LLB';
-      } else if (lowerName.includes('economic')) {
-        programName = 'BA Economics';
-      } else {
-        // Fuzzy match against validPrograms
-        programName = validPrograms.find(p => 
-          p.toLowerCase() === lowerName ||
-          p.toLowerCase().includes(lowerName) ||
-          lowerName.includes(p.toLowerCase())
-        ) || programName;
+    // Step 7: Check if multiple programs match (ambiguous query)
+    if (!extractedProgram && isAdmissionRelated) {
+      const suggestions = suggestProgramMatches(message, 3);
+      if (suggestions.length > 1) {
+        const response = `I found multiple programs that might match your query. Did you mean one of these?\n\n${suggestions.map((program, index) => `${index + 1}. ${program}`).join('\n')}\n\nPlease specify which program you're interested in.`;
+        
+        await admin.firestore().collection('faqs').add({
+          question: message,
+          answer: response,
+          frequency: 1,
+          timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        
+        // Save to chat history
+        await saveChatMessage(req.user.uid, message, response);
+        
+        return res.json({ response });
       }
-      console.log('Extracted programName:', programName);
     }
 
-    let program = programName ? findProgramByName(programName) : null;
-
-    // Fallback search in pdfData.programs
-    if (!program && programName) {
-      const lowerQuery = programName.toLowerCase();
-      program = (pdfData?.programs || []).find(p => 
-        p.name.toLowerCase().includes(lowerQuery) ||
-        lowerQuery.includes(p.name.toLowerCase())
-      );
-    }
-
+    // Step 8: Handle general queries with GPT but with strict dataset context
     let responseText = '';
-
-    if (program) {
+    
+    if (isAdmissionRelated) {
+      // For admission queries without specific program, use limited GPT with dataset context
       const prompt = `
-        You are a KNUST admissions assistant for freshers. Answer the user's question using ONLY the following program data. Provide a concise, accurate response with details on cut-offs, fees, core and elective requirements, and streams.
+        You are a KNUST Admission Bot created by Rockson Agyamaku. Answer this admission-related query using ONLY information that would be available in the KNUST official dataset.
 
-        Program Data:
-        - Name: ${program.name}
-        - College: ${program.college}
-        - Cut-offs: Male: ${program.cutoffs.male || program.cutoffs}, Female: ${program.cutoffs.female || program.cutoffs}
-        - Stream: ${program.stream.join(', ')}
-        - Fees:
-          - Regular Freshers: GHC ${program.fees.regular_freshers}
-          - Fee-Paying Freshers: GHC ${program.fees.fee_paying_freshers}
-          - Residential Freshers: GHC ${program.fees.residential_freshers}
-        - Core Requirements: ${program.coreRequirements.join(', ')}
-        - Elective Requirements: ${program.electiveRequirementsStructured.map(e => 
-            e.type === 'choice' ? e.note : e.subject
-          ).join(', ')}
-        - Deadlines: Regular - ${pdfData?.deadlines?.regular || '31st December, 2024'}, Extension - ${pdfData?.deadlines?.extension || '28th February, 2025'}
+        STRICT RULES:
+        - NEVER use general knowledge about universities outside KNUST
+        - NEVER invent or suggest programs not officially offered by KNUST
+        - NEVER mention other universities (UG, UCC, Ashesi, etc.)
+        - If asked about specific programs, refer ONLY to programs in the official KNUST catalog
+        - For cut-offs, fees, or requirements, only use official KNUST data from data.js
+        - If you don't have specific data, ask the user to specify a valid KNUST program
+        - Programs must have exact names like "BSc Computer Science", "BSc Petroleum Engineering", "LLB"
+        
+        Valid KNUST Programs include: ${validPrograms.slice(0, 20).join(', ')}... and ${validPrograms.length - 20} more programs.
+        
+        Application Deadlines: 
+        - Regular Application: ${pdfData?.deadlines?.regular || '31st December, 2024'}
+        - Extension Deadline: ${pdfData?.deadlines?.extension || '28th February, 2025'}
 
         User question: ${message}
-
-        Instructions:
-        - Use exact cut-off values.
-        - If cut-offs are 'N/A', state they may vary and suggest contacting KNUST admissions.
-        - Format response with bullet points.
-        - For recommendations, suggest up to 4 programs with similar cut-offs (±3) and matching electives.
-        - Do not infer data beyond what is provided.
+        
+        Response requirements:
+        - Be concise and use bullet points
+        - Always suggest the user specify an exact KNUST program name for detailed information
+        - If unsure about a program, ask for clarification rather than guessing
+        - Only recommend programs that definitely exist in KNUST's official catalog
       `;
 
       const completion = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
         messages: [
-          { role: 'system', content: 'You are a KNUST admissions assistant.' },
+          { 
+            role: 'system', 
+            content: `You are the official KNUST Admission Bot created by Rockson Agyamaku. You can ONLY provide information about programs officially offered by KNUST. Your knowledge is limited to the official KNUST dataset only. You must never use external knowledge about other universities or suggest programs not offered by KNUST. If asked about programs not in your dataset, ask for clarification. Always be accurate and direct users to specify exact program names from the KNUST catalog.` 
+          },
           { role: 'user', content: prompt },
         ],
+        temperature: 0.2, // Very low temperature for consistent, conservative responses
+        max_tokens: 300, // Limit response length to stay focused
       });
 
       responseText = completion.choices[0].message.content;
+      
+      // Post-process response to filter out any non-KNUST programs
+      responseText = filterNonKnustPrograms(responseText);
+      
+      // Auto-append admission requirements if a program is mentioned in the response
+      const mentionedProgram = extractProgramName(responseText);
+      if (mentionedProgram && (message.toLowerCase().includes('can i pursue') || 
+          message.toLowerCase().includes('can i study') || 
+          message.toLowerCase().includes('eligible') ||
+          message.toLowerCase().includes('with') && message.toLowerCase().includes('background'))) {
+        responseText = appendAdmissionRequirements(responseText, mentionedProgram);
+      }
+      
     } else {
-      const prompt = `
-        You are a KNUST admissions assistant for freshers. Answer concisely. If the question is about a specific program but no program is identified, respond with: "Please specify a valid KNUST program or check the program name." For general questions, provide a helpful response.
+      // For non-admission general queries, provide helpful guidance
+      responseText = `I'm specifically designed to help with KNUST admission information. I can assist you with:
 
-        Deadlines: Regular - ${pdfData?.deadlines?.regular || '31st December, 2024'}, Extension - ${pdfData?.deadlines?.extension || '28th February, 2025'}
+• Program cut-off points and admission requirements
+• Fee structures for different colleges
+• Application deadlines and processes
+• Subject requirements for specific programs
+• Program recommendations based on your background
 
-        User question: ${message}
-      `;
+Please ask me about any KNUST program (e.g., "What are the requirements for BSc Computer Science?" or "Tell me about BSc Petroleum Engineering fees").
 
-      const completion = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: 'You are a KNUST admissions assistant.' },
-          { role: 'user', content: prompt },
-        ],
-      });
-
-      responseText = completion.choices[0].message.content;
+How can I help you with KNUST admissions today?`;
     }
 
     await admin.firestore().collection('faqs').add({
@@ -331,15 +478,88 @@ router.post('/chat', authenticateToken, async (req, res) => {
       timestamp: admin.firestore.FieldValue.serverTimestamp(),
     });
 
+    // Save to chat history
+    await saveChatMessage(req.user.uid, message, responseText);
+
     res.json({ response: responseText });
+    
   } catch (error) {
     console.error('Error in /chat:', {
       message: error.message,
       stack: error.stack,
     });
-    res.status(500).json({ error: 'Failed to process message' });
+    
+    // Provide helpful error response
+    const errorResponse = "I apologize, but I'm having technical difficulties. Please try asking about a specific KNUST program (e.g., 'BSc Computer Science cut-off' or 'Engineering fees') and I'll do my best to help you.";
+    res.status(500).json({ error: errorResponse });
   }
 });
+
+// Middleware to filter responses and ensure only KNUST programs are mentioned
+function ensureDatasetOnly(req, res, next) {
+    const originalJson = res.json;
+    
+    res.json = function(data) {
+        if (data && data.response) {
+            // Filter out any non-KNUST programs from the response
+            data.response = filterNonKnustPrograms(data.response);
+        }
+        return originalJson.call(this, data);
+    };
+    
+    next();
+}
+
+// Helper function to filter out non-KNUST programs from GPT responses
+function filterNonKnustPrograms(responseText) {
+    if (!responseText) return responseText;
+    
+    // List of common non-KNUST program keywords to filter out
+    const nonKnustKeywords = [
+        'University of Ghana', 'UG', 'Legon',
+        'University of Cape Coast', 'UCC',
+        'University for Development Studies', 'UDS',
+        'Ashesi University', 'Central University',
+        'Presbyterian University', 'Methodist University',
+        'BSc Software Engineering', // KNUST doesn't offer this specific program
+        'BSc Information Technology', // Not in KNUST list
+        'BSc Cybersecurity', // Not in KNUST list
+        'Bachelor of Information Technology',
+        'Bachelor of Software Engineering'
+    ];
+    
+    let filteredText = responseText;
+    
+    // Remove references to non-KNUST institutions
+    nonKnustKeywords.forEach(keyword => {
+        const regex = new RegExp(keyword, 'gi');
+        filteredText = filteredText.replace(regex, '[KNUST equivalent program]');
+    });
+    
+    // If response contains program recommendations, verify they exist in validPrograms
+    const programMentions = filteredText.match(/(?:BSc|BA|BFA|BEd|LLB|PharmD|DVM|BDS|BHM|Doctor of)\s+[\w\s\/\(\)]+/gi);
+    
+    if (programMentions) {
+        programMentions.forEach(mention => {
+            const isValidKnustProgram = validPrograms.some(program => 
+                program.toLowerCase().includes(mention.toLowerCase()) ||
+                mention.toLowerCase().includes(program.toLowerCase())
+            );
+            
+            if (!isValidKnustProgram) {
+                // Replace with closest KNUST program or generic text
+                const closestMatch = findProgramWithFuzzySearch(mention);
+                if (closestMatch) {
+                    filteredText = filteredText.replace(mention, closestMatch);
+                } else {
+                    filteredText = filteredText.replace(mention, '[KNUST program - please specify]');
+                }
+            }
+        });
+    }
+    
+    return filteredText;
+}
 
 // Get all programs
 router.get('/programs', authenticateToken, async (req, res) => {
@@ -368,40 +588,104 @@ router.get('/programs', authenticateToken, async (req, res) => {
   }
 });
 
-// Search programs
+// Enhanced Search programs with proper college filtering and fuzzy search
 router.get('/programs/search', authenticateToken, async (req, res) => {
   try {
-    let results = pdfData?.programs || [];
-    if (results.length === 0) {
-      const snapshot = await programsCollection.get();
-      results = snapshot.docs.map(doc => ({ docId: doc.id, ...doc.data() }));
-    }
-
     const { query, college } = req.query;
+    
+    console.log('Search request:', { query, college });
+    
+    // Start with all valid programs from data.js
+    let results = validPrograms.map(programName => {
+      const programData = getProgramData(programName);
+      return {
+        name: programName,
+        college: programData.college,
+        cutoff: programData.cutoff,
+        fees: programData.fees,
+        requirements: programData.requirements
+      };
+    });
 
-    if (college.length > 0) {
-      results = results.filter(p => 
-        p.college.toLowerCase().includes(college.toLowerCase())
+    console.log('Total programs before filtering:', results.length);
+
+    // Filter by college first if specified
+    if (college && college.trim() !== '') {
+      const collegeFilter = college.toLowerCase().trim();
+      results = results.filter(program => 
+        program.college && program.college.toLowerCase().includes(collegeFilter)
       );
+      console.log(`Programs after college filter "${college}":`, results.length);
     }
 
-    if (query) {
-      results = results.filter(p => 
-        p.name.toLowerCase().includes(query.toLowerCase())
+    // Then filter by search query if specified
+    if (query && query.trim() !== '') {
+      const searchQuery = query.toLowerCase().trim();
+      
+      // Use multiple search strategies for better results
+      const exactMatches = results.filter(program => 
+        program.name.toLowerCase().includes(searchQuery)
       );
+      
+      // Use fuzzy search for additional matches if exact matches are few
+      let fuzzyMatches = [];
+      if (exactMatches.length < 3) {
+        const fuzzyResults = fuzzySearchPrograms(query, 10);
+        fuzzyMatches = fuzzyResults
+          .map(result => results.find(program => program.name === result.program))
+          .filter(program => program && !exactMatches.some(exact => exact.name === program.name));
+      }
+      
+      results = [...exactMatches, ...fuzzyMatches];
+      console.log(`Programs after search query "${query}":`, results.length);
     }
 
     if (results.length === 0) {
-      console.error('No programs match the criteria:', { query, college });
-      return res.status(404).json({ error: 'No programs found' });
+      console.log('No programs match the criteria:', { query, college });
+      return res.status(404).json({ 
+        error: 'No programs found',
+        message: 'Try adjusting your search terms or removing filters',
+        searchCriteria: { query, college }
+      });
     }
 
-    res.json({ results: results.map(p => ({
-      id: p.docId,
-      name: p.name,
-      description: `A program offered by the ${p.college} at KNUST.`,
-      requirements: `${p.coreRequirements.join(', ')}; Electives: ${p.electiveRequirementsStructured.map(e => e.type === 'choice' ? e.note : e.subject).join(', ')}`
-    })) });
+    // Sort results by relevance (exact matches first, then by cut-off)
+    results.sort((a, b) => {
+      if (query) {
+        const aExact = a.name.toLowerCase().includes(query.toLowerCase());
+        const bExact = b.name.toLowerCase().includes(query.toLowerCase());
+        if (aExact && !bExact) return -1;
+        if (!aExact && bExact) return 1;
+      }
+      return a.cutoff - b.cutoff; // Then by competitiveness
+    });
+
+    // Format response for mobile app
+    const formattedResults = results.map(program => ({
+      id: program.name.replace(/\s+/g, '_').toLowerCase(), // Create unique ID
+      name: program.name,
+      description: `A program offered by ${program.college} at KNUST.`,
+      college: program.college,
+      cutoff: program.cutoff,
+      requirements: program.requirements ? 
+        `Core: Mathematics, English, Science; Electives: ${
+          Array.isArray(program.requirements) ? 
+          program.requirements.map(req => 
+            Array.isArray(req) ? req.join(' OR ') : req
+          ).join(', ') : 
+          'Please contact admissions'
+        }` : 
+        'Requirements not specified',
+      fees: program.fees
+    }));
+
+    console.log('Returning', formattedResults.length, 'programs');
+
+    res.json({ 
+      results: formattedResults,
+      total: formattedResults.length,
+      searchCriteria: { query, college }
+    });
   } catch (error) {
     console.error('Error searching programs:', {
       message: error.message,
@@ -651,142 +935,211 @@ router.get('/recommendations', authenticateToken, async (req, res) => {
   }
 });
 
-// Saved Programs Endpoints
-router.get('/saved-programs', authenticateToken, async (req, res) => {
-  try {
-    const snapshot = await admin.firestore().collection('savedPrograms')
-      .where('uid', '==', req.user.uid)
-      .orderBy('savedAt', 'desc')
-      .get();
-    const savedPrograms = snapshot.docs.map(doc => ({
-      id: doc.id,
-      programName: doc.data().programName,
-      course: doc.data().course,
-      savedAt: doc.data().savedAt.toDate().toISOString()
-    }));
-    res.json(savedPrograms);
-  } catch (error) {
-    console.error('Error fetching saved programs:', {
-      message: error.message,
-      stack: error.stack,
-    });
-    res.status(500).json({ error: 'Failed to fetch saved programs' });
-  }
-});
+// User Management Endpoints
 
-router.post('/saved-programs', authenticateToken, async (req, res) => {
-  const { programName, course } = req.body;
-  if (!programName || !course) {
-    console.error('Missing programName or course');
-    return res.status(400).json({ error: 'programName and course required' });
-  }
-
+// Get user profile
+router.get('/profile', authenticateToken, async (req, res) => {
   try {
-    // Verify program exists
-    const program = (pdfData?.programs || []).find(p => p.name === programName);
-    if (!program) {
-      console.error('Program not found:', programName);
-      return res.status(404).json({ error: 'Program not found' });
+    const userDoc = await admin.firestore().collection('users').doc(req.user.uid).get();
+    
+    if (!userDoc.exists) {
+      return res.status(404).json({ error: 'User profile not found' });
     }
 
-    const docRef = await admin.firestore().collection('savedPrograms').add({
+    const userData = userDoc.data();
+    res.json({
       uid: req.user.uid,
-      programName,
-      course,
-      savedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-    res.status(201).json({ 
-      id: docRef.id, 
-      programName, 
-      course, 
-      savedAt: new Date().toISOString() 
+      email: req.user.email,
+      ...userData
     });
   } catch (error) {
-    console.error('Error saving program:', {
-      message: error.message,
-      stack: error.stack,
-    });
-    res.status(500).json({ error: 'Failed to save program' });
+    console.error('Error fetching user profile:', error);
+    res.status(500).json({ error: 'Failed to fetch user profile' });
   }
 });
 
-router.delete('/saved-programs/:id', authenticateToken, async (req, res) => {
+// Update user profile
+router.put('/profile', authenticateToken, async (req, res) => {
   try {
-    const docRef = admin.firestore().collection('savedPrograms').doc(req.params.id);
-    const doc = await docRef.get();
-    if (!doc.exists) {
-      console.error('Saved program not found:', req.params.id);
-      return res.status(404).json({ error: 'Saved program not found' });
-    }
-    if (doc.data().uid !== req.user.uid) {
-      console.error('Unauthorized attempt to delete saved program:', req.params.id);
-      return res.status(403).json({ error: 'Unauthorized' });
-    }
-
-    await docRef.delete();
-    res.json({ message: 'Saved program deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting saved program:', {
-      message: error.message,
-      stack: error.stack,
-    });
-    res.status(500).json({ error: 'Failed to delete saved program' });
-  }
-});
-
-// Support Endpoint
-router.post('/support', authenticateToken, async (req, res) => {
-  const { subject, message } = req.body;
-  if (!subject || !message) {
-    console.error('Missing subject or message');
-    return res.status(400).json({ error: 'Subject and message required' });
-  }
-
-  try {
-    await admin.firestore().collection('supportInquiries').add({
-      uid: req.user.uid,
-      subject,
-      message,
-      status: 'open',
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-    res.status(201).json({ message: 'Support inquiry submitted successfully' });
-  } catch (error) {
-    console.error('Error submitting support inquiry:', {
-      message: error.message,
-      stack: error.stack,
-    });
-    res.status(500).json({ error: 'Failed to submit support inquiry' });
-  }
-});
-
-// About Endpoint
-router.get('/about', async (req, res) => {
-  try {
-    const aboutData = {
-      appName: 'KNUST Chatbot',
-      version: '1.0.0',
-      description: 'A chatbot application to assist prospective KNUST students with program selection, admissions information, and more.',
-      contact: {
-        email: 'support@knustchatbot.com',
-        phone: '+233 123 456 789',
-        website: 'https://knustchatbot.com'
-      },
-      lastUpdated: '2025-06-23'
+    const { firstName, lastName, phone, shs, currentLevel, program } = req.body;
+    
+    const updateData = {
+      ...(firstName && { firstName }),
+      ...(lastName && { lastName }),
+      ...(phone && { phone }),
+      ...(shs && { shs }),
+      ...(currentLevel && { currentLevel }),
+      ...(program && { program }),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
     };
-    res.json(aboutData);
+
+    await admin.firestore().collection('users').doc(req.user.uid).update(updateData);
+    
+    res.json({ message: 'Profile updated successfully', updatedFields: Object.keys(updateData) });
   } catch (error) {
-    console.error('Error fetching about data:', {
-      message: error.message,
-      stack: error.stack,
-    });
-    res.status(500).json({ error: 'Failed to fetch about data' });
+    console.error('Error updating user profile:', error);
+    res.status(500).json({ error: 'Failed to update profile' });
   }
 });
 
-// Health check
-router.get('/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
+// Calculate aggregate for user
+router.post('/calculate-aggregate', authenticateToken, async (req, res) => {
+  const { grades } = req.body;
+  if (!grades || typeof grades !== 'object') {
+    console.error('Invalid grades object');
+    return res.status(400).json({ error: 'Valid grades object required' });
+  }
+
+  try {
+    const aggregate = calculateAggregate(grades);
+    
+    // Save the aggregate calculation to user's profile
+    await admin.firestore().collection('users').doc(req.user.uid).update({
+      lastAggregate: aggregate,
+      lastGrades: grades,
+      aggregateCalculatedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    res.json({ aggregate, message: 'Aggregate calculated and saved to profile' });
+  } catch (error) {
+    console.error('Error calculating aggregate:', {
+      message: error.message,
+      stack: error.stack,
+    });
+    res.status(400).json({ error: 'Invalid grades format' });
+  }
+});
+
+// Get eligible programs for user based on their aggregate
+router.get('/eligible-programs', authenticateToken, async (req, res) => {
+  try {
+    const userDoc = await admin.firestore().collection('users').doc(req.user.uid).get();
+    
+    if (!userDoc.exists || !userDoc.data().lastAggregate) {
+      return res.status(400).json({ error: 'Please calculate your aggregate first' });
+    }
+
+    const userData = userDoc.data();
+    const userAggregate = userData.lastAggregate;
+    const userGrades = userData.lastGrades;
+
+    // Find programs user is eligible for
+    const eligiblePrograms = [];
+    
+    for (const [programName, cutoff] of Object.entries(cutOffAggregates)) {
+      if (userAggregate <= cutoff) {
+        const programData = getProgramData(programName);
+        if (programData) {
+          // Check if user has required subjects (if electives provided)
+          let meetsRequirements = true;
+          if (userGrades.electives && programData.requirements) {
+            meetsRequirements = matchesElectives(userGrades.electives, programData.requirements);
+          }
+
+          eligiblePrograms.push({
+            ...programData,
+            yourAggregate: userAggregate,
+            difference: cutoff - userAggregate,
+            meetsSubjectRequirements: meetsRequirements
+          });
+        }
+      }
+    }
+
+    // Sort by cut-off (most competitive first)
+    eligiblePrograms.sort((a, b) => a.cutoff - b.cutoff);
+
+    res.json({
+      totalEligible: eligiblePrograms.length,
+      yourAggregate: userAggregate,
+      programs: eligiblePrograms.slice(0, 20), // Limit to top 20
+      note: 'Programs are sorted by competitiveness (lowest cut-off first)'
+    });
+  } catch (error) {
+    console.error('Error fetching eligible programs:', error);
+    res.status(500).json({ error: 'Failed to fetch eligible programs' });
+  }
+});
+
+// Get all colleges with program counts
+router.get('/colleges', authenticateToken, async (req, res) => {
+  try {
+    const collegeStats = {};
+    
+    // Count programs per college
+    validPrograms.forEach(programName => {
+      const programData = getProgramData(programName);
+      if (programData && programData.college) {
+        const college = programData.college;
+        if (!collegeStats[college]) {
+          collegeStats[college] = {
+            name: college,
+            programCount: 0,
+            programs: []
+          };
+        }
+        collegeStats[college].programCount++;
+        collegeStats[college].programs.push({
+          name: programName,
+          cutoff: programData.cutoff
+        });
+      }
+    });
+
+    // Sort programs in each college by cut-off
+    Object.values(collegeStats).forEach(college => {
+      college.programs.sort((a, b) => a.cutoff - b.cutoff);
+    });
+
+    const colleges = Object.values(collegeStats).sort((a, b) => a.name.localeCompare(b.name));
+
+    res.json({
+      colleges,
+      totalColleges: colleges.length,
+      totalPrograms: validPrograms.length
+    });
+  } catch (error) {
+    console.error('Error fetching colleges:', error);
+    res.status(500).json({ error: 'Failed to fetch colleges' });
+  }
+});
+
+// Get programs for a specific college
+router.get('/colleges/:collegeName/programs', authenticateToken, async (req, res) => {
+  try {
+    const { collegeName } = req.params;
+    const decodedCollegeName = decodeURIComponent(collegeName);
+    
+    const programs = validPrograms
+      .map(programName => {
+        const programData = getProgramData(programName);
+        return {
+          name: programName,
+          ...programData
+        };
+      })
+      .filter(program => 
+        program.college && 
+        program.college.toLowerCase().includes(decodedCollegeName.toLowerCase())
+      )
+      .sort((a, b) => a.cutoff - b.cutoff);
+
+    if (programs.length === 0) {
+      return res.status(404).json({ 
+        error: 'No programs found for this college',
+        collegeName: decodedCollegeName
+      });
+    }
+
+    res.json({
+      college: decodedCollegeName,
+      programs,
+      totalPrograms: programs.length
+    });
+  } catch (error) {
+    console.error('Error fetching college programs:', error);
+    res.status(500).json({ error: 'Failed to fetch college programs' });
+  }
 });
 
 module.exports = router;
