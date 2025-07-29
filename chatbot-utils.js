@@ -425,6 +425,19 @@ function appendAdmissionRequirements(response, programName) {
     return appendedResponse;
 }
 
+/**
+ * Save chat message to Firestore for chat history
+ */
+async function saveChatMessage(uid, message, response) {
+    const admin = require('firebase-admin');
+    await admin.firestore().collection('chat_history').add({
+        uid,
+        message,
+        response,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    });
+}
+
 module.exports = {
     isAdmissionQuery,
     isCareerAcademicQuery,
@@ -439,6 +452,7 @@ module.exports = {
     generateDatasetResponse,
     checkEligibilityByBackground,
     appendAdmissionRequirements,
+    saveChatMessage,
     ADMISSION_KEYWORDS,
     CAREER_ACADEMIC_KEYWORDS
 };

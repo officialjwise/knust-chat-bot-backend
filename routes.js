@@ -20,7 +20,8 @@ const {
     findSimilarPrograms,
     generateDatasetResponse,
     checkEligibilityByBackground,
-    appendAdmissionRequirements
+    appendAdmissionRequirements,
+    saveChatMessage
 } = require('./chatbot-utils');
 
 const programsCollection = admin.firestore().collection('programs');
@@ -240,7 +241,7 @@ router.post('/reset-password', async (req, res) => {
 });
 
 // Enhanced Chat endpoint with dataset-scoped responses
-router.post('/chat', authenticateToken, ensureDatasetOnly, async (req, res) => {
+router.post('/chat', /* authenticateToken, */ ensureDatasetOnly, async (req, res) => {
   const { message, sender } = req.body;
   if (!message || !sender) {
     console.error('Missing message or sender');
@@ -309,7 +310,8 @@ router.post('/chat', authenticateToken, ensureDatasetOnly, async (req, res) => {
         });
         
         // Save to chat history
-        await saveChatMessage(req.user.uid, message, response);
+        const uid = req.user?.uid || req.body.sender || 'anonymous';
+        await saveChatMessage(uid, message, response);
         
         return res.json({ response });
     }
@@ -371,7 +373,8 @@ router.post('/chat', authenticateToken, ensureDatasetOnly, async (req, res) => {
         });
         
         // Save to chat history
-        await saveChatMessage(req.user.uid, message, response);
+        const uid = req.user?.uid || req.body.sender || 'anonymous';
+        await saveChatMessage(uid, message, response);
         
         return res.json({ response });
       }
@@ -391,7 +394,8 @@ router.post('/chat', authenticateToken, ensureDatasetOnly, async (req, res) => {
         });
         
         // Save to chat history
-        await saveChatMessage(req.user.uid, message, response);
+        const uid = req.user?.uid || req.body.sender || 'anonymous';
+        await saveChatMessage(uid, message, response);
         
         return res.json({ response });
       }
@@ -429,19 +433,25 @@ router.post('/chat', authenticateToken, ensureDatasetOnly, async (req, res) => {
         - Only recommend programs that definitely exist in KNUST's official catalog
       `;
 
-      const completion = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [
-          { 
-            role: 'system', 
-            content: `You are the official KNUST Admission Bot created by Rockson Agyamaku. You can ONLY provide information about programs officially offered by KNUST. Your knowledge is limited to the official KNUST dataset only. You must never use external knowledge about other universities or suggest programs not offered by KNUST. If asked about programs not in your dataset, ask for clarification. Always be accurate and direct users to specify exact program names from the KNUST catalog.` 
-          },
-          { role: 'user', content: prompt },
-        ],
-        temperature: 0.2, // Very low temperature for consistent, conservative responses
-        max_tokens: 300, // Limit response length to stay focused
-      });
-
+      let completion;
+      try {
+        completion = await openai.chat.completions.create({
+          model: 'gpt-4o-mini',
+          messages: [
+            { 
+              role: 'system', 
+              content: `You are the official KNUST Admission Bot created by Rockson Agyamaku. You can ONLY provide information about programs officially offered by KNUST. Your knowledge is limited to the official KNUST dataset only. You must never use external knowledge about other universities or suggest programs not offered by KNUST. If asked about programs not in your dataset, ask for clarification. Always be accurate and direct users to specify exact program names from the KNUST catalog.` 
+            },
+            { role: 'user', content: prompt },
+          ],
+          temperature: 0.2,
+          max_tokens: 300,
+        });
+      } catch (openaiError) {
+        console.error('OpenAI API error:', openaiError);
+        responseText = 'OpenAI API error: ' + (openaiError?.message || JSON.stringify(openaiError));
+      }
+      
       responseText = completion.choices[0].message.content;
       
       // Post-process response to filter out any non-KNUST programs
