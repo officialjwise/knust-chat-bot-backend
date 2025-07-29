@@ -489,7 +489,8 @@ How can I help you with KNUST admissions today?`;
     });
 
     // Save to chat history
-    await saveChatMessage(req.user.uid, message, responseText);
+    const uid = req.user?.uid || req.body.sender || 'anonymous';
+    await saveChatMessage(uid, message, responseText);
 
     res.json({ response: responseText });
     
