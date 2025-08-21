@@ -79,6 +79,9 @@ function matchesElectives(userElectives, programElectives) {
 // Firebase Web API Key (store in environment variables in production)
 const FIREBASE_API_KEY = process.env.FIREBASE_API_KEY || 'AIzaSyBa3Ht1TcWCrUSsN5o3mGhGTVPjjz-8KJU';
 
+// Log Firebase API key for debugging (first 10 chars only)
+console.log('🔑 Firebase API Key configured:', FIREBASE_API_KEY ? FIREBASE_API_KEY.substring(0, 10) + '...' : 'NOT SET');
+
 // Middleware to authenticate JWT token
 const authenticateToken = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -145,8 +148,14 @@ router.post('/signup', async (req, res) => {
       uid: userRecord.uid,
       firstName,
       lastName,
+      name: `${firstName} ${lastName}`,
       email,
+      role: 'user',
+      isActive: true,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      lastLogin: null,
+      loginCount: 0,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
     res.status(201).json({ uid: userRecord.uid, message: 'User created successfully' });
@@ -169,6 +178,9 @@ router.post('/signin', async (req, res) => {
   }
 
   try {
+    console.log('🔐 Attempting signin for:', email);
+    console.log('🌐 Using Firebase API Key:', FIREBASE_API_KEY.substring(0, 10) + '...');
+    
     // Verify email and password using Firebase Auth REST API
     const authResponse = await axios.post(
       `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${FIREBASE_API_KEY}`,
@@ -179,8 +191,23 @@ router.post('/signin', async (req, res) => {
       }
     );
 
+    console.log('✅ Firebase auth successful for:', email);
+
     // Get user by email for additional info
     const user = await admin.auth().getUserByEmail(email);
+
+    // Update lastLogin timestamp and increment login count
+    try {
+      await admin.firestore().collection('users').doc(user.uid).update({
+        lastLogin: admin.firestore.FieldValue.serverTimestamp(),
+        loginCount: admin.firestore.FieldValue.increment(1),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      console.log('📝 Updated login tracking for:', email);
+    } catch (updateError) {
+      console.warn('⚠️ Failed to update login tracking:', updateError.message);
+      // Don't fail the signin if tracking update fails
+    }
 
     res.json({
       user: {
@@ -193,8 +220,12 @@ router.post('/signin', async (req, res) => {
       message: 'Sign-in successful',
     });
   } catch (error) {
-    console.error('Error signing in:', {
+    console.error('❌ Error signing in:', {
       message: error.message,
+      email: email,
+      firebaseApiKey: FIREBASE_API_KEY ? 'SET' : 'NOT SET',
+      errorResponse: error.response?.data,
+      status: error.response?.status,
       code: error.code,
       stack: error.stack,
     });
@@ -1022,12 +1053,17 @@ router.get('/api/users', authenticateToken, requireAdmin, async (req, res) => {
       const userData = doc.data();
       users.push({
         id: doc.id,
-        email: userData.email,
-        name: userData.name,
+        email: userData.email || 'N/A',
+        name: userData.name || userData.firstName && userData.lastName ? 
+          `${userData.firstName} ${userData.lastName}` : userData.email || 'Unknown',
+        firstName: userData.firstName || '',
+        lastName: userData.lastName || '',
         role: userData.role || 'user',
-        createdAt: userData.createdAt,
-        lastLogin: userData.lastLogin,
-        isActive: userData.isActive !== false
+        createdAt: userData.createdAt ? userData.createdAt.toDate().toISOString() : null,
+        lastLogin: userData.lastLogin ? userData.lastLogin.toDate().toISOString() : null,
+        loginCount: userData.loginCount || 0,
+        isActive: userData.isActive !== false,
+        updatedAt: userData.updatedAt ? userData.updatedAt.toDate().toISOString() : null
       });
     });
     
@@ -1374,6 +1410,277 @@ router.get('/api/users/:id/chat-history', authenticateToken, requireAdmin, async
   } catch (error) {
     console.error('Error fetching user chat history:', error);
     res.status(500).json({ error: 'Failed to fetch user chat history' });
+  }
+});
+
+// =======================
+// USER DATA MANAGEMENT ENDPOINTS
+// =======================
+
+// Fix/migrate existing user data
+router.post('/api/admin/users/fix-data', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    console.log('🔧 Starting user data migration...');
+    
+    const usersSnapshot = await admin.firestore().collection('users').get();
+    let updatedCount = 0;
+    
+    const batch = admin.firestore().batch();
+    
+    usersSnapshot.forEach(doc => {
+      const userData = doc.data();
+      const updates = {};
+      
+      // Add missing fields with default values
+      if (!userData.role) updates.role = 'user';
+      if (!userData.isActive) updates.isActive = true;
+      if (!userData.name && userData.firstName && userData.lastName) {
+        updates.name = `${userData.firstName} ${userData.lastName}`;
+      }
+      if (!userData.loginCount) updates.loginCount = 0;
+      if (!userData.updatedAt) updates.updatedAt = admin.firestore.FieldValue.serverTimestamp();
+      
+      // Only update if there are changes
+      if (Object.keys(updates).length > 0) {
+        batch.update(doc.ref, updates);
+        updatedCount++;
+      }
+    });
+    
+    await batch.commit();
+    
+    console.log(`✅ Updated ${updatedCount} user records`);
+    res.json({ 
+      message: 'User data migration completed successfully',
+      updatedUsers: updatedCount,
+      totalUsers: usersSnapshot.size
+    });
+  } catch (error) {
+    console.error('Error fixing user data:', error);
+    res.status(500).json({ error: 'Failed to fix user data' });
+  }
+});
+
+// Get user login analytics
+router.get('/api/analytics/user-logins', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { period = '30' } = req.query;
+    const daysAgo = new Date();
+    daysAgo.setDate(daysAgo.getDate() - parseInt(period));
+    
+    const usersSnapshot = await admin.firestore()
+      .collection('users')
+      .where('lastLogin', '>=', daysAgo)
+      .get();
+    
+    const loginData = {
+      totalActiveUsers: usersSnapshot.size,
+      period: parseInt(period),
+      loginFrequency: {},
+      averageLoginsPerUser: 0
+    };
+    
+    let totalLogins = 0;
+    
+    usersSnapshot.forEach(doc => {
+      const userData = doc.data();
+      const loginCount = userData.loginCount || 0;
+      totalLogins += loginCount;
+      
+      // Group by login frequency
+      if (loginCount === 0) {
+        loginData.loginFrequency['never'] = (loginData.loginFrequency['never'] || 0) + 1;
+      } else if (loginCount <= 5) {
+        loginData.loginFrequency['1-5'] = (loginData.loginFrequency['1-5'] || 0) + 1;
+      } else if (loginCount <= 20) {
+        loginData.loginFrequency['6-20'] = (loginData.loginFrequency['6-20'] || 0) + 1;
+      } else {
+        loginData.loginFrequency['20+'] = (loginData.loginFrequency['20+'] || 0) + 1;
+      }
+    });
+    
+    loginData.averageLoginsPerUser = usersSnapshot.size > 0 ? 
+      (totalLogins / usersSnapshot.size).toFixed(1) : 0;
+    
+    res.json(loginData);
+  } catch (error) {
+    console.error('Error fetching login analytics:', error);
+    res.status(500).json({ error: 'Failed to fetch login analytics' });
+  }
+});
+
+// Get user registration analytics
+router.get('/api/analytics/user-registrations', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { period = '30' } = req.query;
+    const daysAgo = new Date();
+    daysAgo.setDate(daysAgo.getDate() - parseInt(period));
+    
+    const usersSnapshot = await admin.firestore()
+      .collection('users')
+      .where('createdAt', '>=', daysAgo)
+      .orderBy('createdAt')
+      .get();
+    
+    // Group registrations by day
+    const dailyRegistrations = {};
+    
+    usersSnapshot.forEach(doc => {
+      const userData = doc.data();
+      const date = userData.createdAt?.toDate?.()?.toISOString?.()?.split('T')[0] || 'unknown';
+      dailyRegistrations[date] = (dailyRegistrations[date] || 0) + 1;
+    });
+    
+    const registrationData = Object.entries(dailyRegistrations)
+      .map(([date, count]) => ({ date, registrations: count }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    
+    res.json({
+      period: parseInt(period),
+      totalNewUsers: usersSnapshot.size,
+      dailyRegistrations: registrationData,
+      averageDaily: (usersSnapshot.size / parseInt(period)).toFixed(1)
+    });
+  } catch (error) {
+    console.error('Error fetching registration analytics:', error);
+    res.status(500).json({ error: 'Failed to fetch registration analytics' });
+  }
+});
+
+// Create user by admin
+router.post('/api/admin/users', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { email, password, firstName, lastName, role = 'user' } = req.body;
+    
+    if (!email || !password || !firstName || !lastName) {
+      return res.status(400).json({ error: 'Email, password, firstName, and lastName are required' });
+    }
+    
+    if (!['user', 'admin'].includes(role)) {
+      return res.status(400).json({ error: 'Role must be either "user" or "admin"' });
+    }
+    
+    // Create user in Firebase Auth
+    const userRecord = await admin.auth().createUser({
+      email,
+      password,
+      displayName: `${firstName} ${lastName}`,
+      emailVerified: false,
+    });
+    
+    // Create user document in Firestore
+    await admin.firestore().collection('users').doc(userRecord.uid).set({
+      uid: userRecord.uid,
+      firstName,
+      lastName,
+      name: `${firstName} ${lastName}`,
+      email,
+      role,
+      isActive: true,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      lastLogin: null,
+      loginCount: 0,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdBy: req.user.uid // Track who created this user
+    });
+    
+    res.status(201).json({ 
+      uid: userRecord.uid, 
+      message: 'User created successfully by admin',
+      user: {
+        uid: userRecord.uid,
+        email,
+        name: `${firstName} ${lastName}`,
+        role,
+        isActive: true
+      }
+    });
+  } catch (error) {
+    console.error('Error creating user by admin:', error);
+    if (error.code === 'auth/email-already-exists') {
+      return res.status(400).json({ error: 'Email already exists' });
+    }
+    res.status(500).json({ error: 'Failed to create user' });
+  }
+});
+
+// Bulk user operations
+router.post('/api/admin/users/bulk-action', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { action, userIds } = req.body;
+    
+    if (!action || !userIds || !Array.isArray(userIds)) {
+      return res.status(400).json({ error: 'Action and userIds array are required' });
+    }
+    
+    if (userIds.length === 0) {
+      return res.status(400).json({ error: 'At least one user ID is required' });
+    }
+    
+    const results = {
+      success: [],
+      failed: [],
+      total: userIds.length
+    };
+    
+    for (const userId of userIds) {
+      try {
+        switch (action) {
+          case 'activate':
+            await admin.firestore().collection('users').doc(userId).update({
+              isActive: true,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+            results.success.push(userId);
+            break;
+            
+          case 'deactivate':
+            await admin.firestore().collection('users').doc(userId).update({
+              isActive: false,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+            results.success.push(userId);
+            break;
+            
+          case 'delete':
+            // Delete from Firebase Auth
+            await admin.auth().deleteUser(userId);
+            // Delete from Firestore
+            await admin.firestore().collection('users').doc(userId).delete();
+            results.success.push(userId);
+            break;
+            
+          case 'make-admin':
+            await admin.firestore().collection('users').doc(userId).update({
+              role: 'admin',
+              updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+            results.success.push(userId);
+            break;
+            
+          case 'make-user':
+            await admin.firestore().collection('users').doc(userId).update({
+              role: 'user',
+              updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+            results.success.push(userId);
+            break;
+            
+          default:
+            results.failed.push({ userId, error: 'Invalid action' });
+        }
+      } catch (error) {
+        results.failed.push({ userId, error: error.message });
+      }
+    }
+    
+    res.json({
+      message: `Bulk ${action} completed`,
+      results
+    });
+  } catch (error) {
+    console.error('Error performing bulk action:', error);
+    res.status(500).json({ error: 'Failed to perform bulk action' });
   }
 });
 
