@@ -134,14 +134,13 @@ function loadStaticData() {
 // Initialize Express app
 const app = express();
 
-// Enhanced CORS configuration for production
+// Enhanced CORS configuration - Allow all origins for testing
 const corsOptions = {
-  origin: process.env.NODE_ENV === 'production' 
-    ? ['#', '#']
-    : true,
+  origin: true, // Allow all origins
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  optionsSuccessStatus: 200
 };
 
 app.use(cors(corsOptions));

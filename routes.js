@@ -91,15 +91,37 @@ const authenticateToken = async (req, res, next) => {
 
   try {
     const decodedToken = await admin.auth().verifyIdToken(token);
-    req.user = decodedToken;
+    
+    // Get user data from Firestore to check role
+    const userDoc = await admin.firestore().collection('users').doc(decodedToken.uid).get();
+    const userData = userDoc.exists ? userDoc.data() : {};
+    
+    req.user = {
+      ...decodedToken,
+      role: userData.role || 'user',
+      ...userData
+    };
     next();
   } catch (error) {
     console.error('Error verifying token:', {
       message: error.message,
       stack: error.stack,
     });
-    return res.status(403).json({ error: 'Invalid or expired token' });
+    return res.status(401).json({ error: 'Invalid authentication token' });
   }
+};
+
+// Admin middleware - requires admin role
+const requireAdmin = async (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  
+  next();
 };
 
 // User signup
@@ -157,15 +179,17 @@ router.post('/signin', async (req, res) => {
       }
     );
 
-    // Get user by email
+    // Get user by email for additional info
     const user = await admin.auth().getUserByEmail(email);
 
-    // Create custom token
-    const customToken = await admin.auth().createCustomToken(user.uid);
-
     res.json({
-      uid: user.uid,
-      customToken,
+      user: {
+        uid: user.uid,
+        email: user.email,
+        emailVerified: user.emailVerified
+      },
+      idToken: authResponse.data.idToken,
+      refreshToken: authResponse.data.refreshToken,
       message: 'Sign-in successful',
     });
   } catch (error) {
@@ -241,7 +265,7 @@ router.post('/reset-password', async (req, res) => {
 });
 
 // Enhanced Chat endpoint with dataset-scoped responses
-router.post('/chat', /* authenticateToken, */ ensureDatasetOnly, async (req, res) => {
+router.post('/chat', authenticateToken, ensureDatasetOnly, async (req, res) => {
   const { message, sender } = req.body;
   if (!message || !sender) {
     console.error('Missing message or sender');
@@ -946,210 +970,410 @@ router.get('/recommendations', authenticateToken, async (req, res) => {
   }
 });
 
-// User Management Endpoints
+// ============================================================================
+// ADMIN PANEL ENDPOINTS
+// ============================================================================
 
-// Get user profile
-router.get('/profile', authenticateToken, async (req, res) => {
+// Auth endpoints for admin panel
+router.post('/api/auth/logout', authenticateToken, async (req, res) => {
   try {
-    const userDoc = await admin.firestore().collection('users').doc(req.user.uid).get();
-    
-    if (!userDoc.exists) {
-      return res.status(404).json({ error: 'User profile not found' });
-    }
+    // In Firebase, tokens are stateless, so we just return success
+    // In production, you might want to maintain a blacklist of tokens
+    res.json({ message: 'Logged out successfully' });
+  } catch (error) {
+    console.error('Error logging out:', error);
+    res.status(500).json({ error: 'Failed to logout' });
+  }
+});
 
-    const userData = userDoc.data();
+router.get('/api/auth/me', authenticateToken, async (req, res) => {
+  try {
     res.json({
       uid: req.user.uid,
       email: req.user.email,
+      role: req.user.role,
+      name: req.user.name || req.user.email,
+      createdAt: req.user.createdAt
+    });
+  } catch (error) {
+    console.error('Error getting user info:', error);
+    res.status(500).json({ error: 'Failed to get user info' });
+  }
+});
+
+// User management endpoints
+router.get('/api/users', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { page = 1, limit = 20, search } = req.query;
+    const offset = (page - 1) * limit;
+    
+    let query = admin.firestore().collection('users');
+    
+    if (search) {
+      // Search by email or name
+      query = query.where('email', '>=', search)
+                   .where('email', '<=', search + '\uf8ff');
+    }
+    
+    const snapshot = await query.limit(parseInt(limit)).offset(offset).get();
+    const users = [];
+    
+    snapshot.forEach(doc => {
+      const userData = doc.data();
+      users.push({
+        id: doc.id,
+        email: userData.email,
+        name: userData.name,
+        role: userData.role || 'user',
+        createdAt: userData.createdAt,
+        lastLogin: userData.lastLogin,
+        isActive: userData.isActive !== false
+      });
+    });
+    
+    // Get total count
+    const totalSnapshot = await admin.firestore().collection('users').get();
+    const total = totalSnapshot.size;
+    
+    res.json({
+      users,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching users:', error);
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+router.get('/api/users/:id', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userDoc = await admin.firestore().collection('users').doc(id).get();
+    
+    if (!userDoc.exists) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const userData = userDoc.data();
+    res.json({
+      id: userDoc.id,
       ...userData
     });
   } catch (error) {
-    console.error('Error fetching user profile:', error);
-    res.status(500).json({ error: 'Failed to fetch user profile' });
+    console.error('Error fetching user:', error);
+    res.status(500).json({ error: 'Failed to fetch user' });
   }
 });
 
-// Update user profile
-router.put('/profile', authenticateToken, async (req, res) => {
+router.put('/api/users/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const { firstName, lastName, phone, shs, currentLevel, program } = req.body;
+    const { id } = req.params;
+    const { name, role, isActive } = req.body;
     
-    const updateData = {
-      ...(firstName && { firstName }),
-      ...(lastName && { lastName }),
-      ...(phone && { phone }),
-      ...(shs && { shs }),
-      ...(currentLevel && { currentLevel }),
-      ...(program && { program }),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    };
-
-    await admin.firestore().collection('users').doc(req.user.uid).update(updateData);
+    const updateData = {};
+    if (name !== undefined) updateData.name = name;
+    if (role !== undefined) updateData.role = role;
+    if (isActive !== undefined) updateData.isActive = isActive;
+    updateData.updatedAt = admin.firestore.FieldValue.serverTimestamp();
     
-    res.json({ message: 'Profile updated successfully', updatedFields: Object.keys(updateData) });
+    await admin.firestore().collection('users').doc(id).update(updateData);
+    
+    res.json({ message: 'User updated successfully' });
   } catch (error) {
-    console.error('Error updating user profile:', error);
-    res.status(500).json({ error: 'Failed to update profile' });
+    console.error('Error updating user:', error);
+    res.status(500).json({ error: 'Failed to update user' });
   }
 });
 
-// Calculate aggregate for user
-router.post('/calculate-aggregate', authenticateToken, async (req, res) => {
-  const { grades } = req.body;
-  if (!grades || typeof grades !== 'object') {
-    console.error('Invalid grades object');
-    return res.status(400).json({ error: 'Valid grades object required' });
-  }
-
+router.delete('/api/users/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const aggregate = calculateAggregate(grades);
+    const { id } = req.params;
     
-    // Save the aggregate calculation to user's profile
-    await admin.firestore().collection('users').doc(req.user.uid).update({
-      lastAggregate: aggregate,
-      lastGrades: grades,
-      aggregateCalculatedAt: admin.firestore.FieldValue.serverTimestamp()
-    });
-
-    res.json({ aggregate, message: 'Aggregate calculated and saved to profile' });
+    // Delete user from Firebase Auth
+    await admin.auth().deleteUser(id);
+    
+    // Delete user document from Firestore
+    await admin.firestore().collection('users').doc(id).delete();
+    
+    res.json({ message: 'User deleted successfully' });
   } catch (error) {
-    console.error('Error calculating aggregate:', {
-      message: error.message,
-      stack: error.stack,
-    });
-    res.status(400).json({ error: 'Invalid grades format' });
+    console.error('Error deleting user:', error);
+    res.status(500).json({ error: 'Failed to delete user' });
   }
 });
 
-// Get eligible programs for user based on their aggregate
-router.get('/eligible-programs', authenticateToken, async (req, res) => {
+// Dashboard analytics
+router.get('/api/dashboard/stats', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const userDoc = await admin.firestore().collection('users').doc(req.user.uid).get();
+    // Get user count
+    const usersSnapshot = await admin.firestore().collection('users').get();
+    const totalUsers = usersSnapshot.size;
     
-    if (!userDoc.exists || !userDoc.data().lastAggregate) {
-      return res.status(400).json({ error: 'Please calculate your aggregate first' });
-    }
-
-    const userData = userDoc.data();
-    const userAggregate = userData.lastAggregate;
-    const userGrades = userData.lastGrades;
-
-    // Find programs user is eligible for
-    const eligiblePrograms = [];
+    // Get chat count
+    const chatsSnapshot = await admin.firestore().collection('chat_history').get();
+    const totalChats = chatsSnapshot.size;
     
-    for (const [programName, cutoff] of Object.entries(cutOffAggregates)) {
-      if (userAggregate <= cutoff) {
-        const programData = getProgramData(programName);
-        if (programData) {
-          // Check if user has required subjects (if electives provided)
-          let meetsRequirements = true;
-          if (userGrades.electives && programData.requirements) {
-            meetsRequirements = matchesElectives(userGrades.electives, programData.requirements);
-          }
-
-          eligiblePrograms.push({
-            ...programData,
-            yourAggregate: userAggregate,
-            difference: cutoff - userAggregate,
-            meetsSubjectRequirements: meetsRequirements
-          });
-        }
-      }
-    }
-
-    // Sort by cut-off (most competitive first)
-    eligiblePrograms.sort((a, b) => a.cutoff - b.cutoff);
-
+    // Get FAQ count
+    const faqsSnapshot = await admin.firestore().collection('faqs').get();
+    const totalFaqs = faqsSnapshot.size;
+    
+    // Get recent activity (last 7 days)
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    
+    const recentChatsSnapshot = await admin.firestore()
+      .collection('chat_history')
+      .where('timestamp', '>=', sevenDaysAgo)
+      .get();
+    const recentChats = recentChatsSnapshot.size;
+    
     res.json({
-      totalEligible: eligiblePrograms.length,
-      yourAggregate: userAggregate,
-      programs: eligiblePrograms.slice(0, 20), // Limit to top 20
-      note: 'Programs are sorted by competitiveness (lowest cut-off first)'
+      totalUsers,
+      totalChats,
+      totalFaqs,
+      totalPrograms: validPrograms.length,
+      recentChats,
+      activeUsers: totalUsers // Simplified - could track active sessions
     });
   } catch (error) {
-    console.error('Error fetching eligible programs:', error);
-    res.status(500).json({ error: 'Failed to fetch eligible programs' });
+    console.error('Error fetching dashboard stats:', error);
+    res.status(500).json({ error: 'Failed to fetch dashboard stats' });
   }
 });
 
-// Get all colleges with program counts
-router.get('/colleges', authenticateToken, async (req, res) => {
+// Analytics endpoints
+router.get('/api/analytics/popular-programs', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const collegeStats = {};
+    const { limit = 10 } = req.query;
     
-    // Count programs per college
-    validPrograms.forEach(programName => {
-      const programData = getProgramData(programName);
-      if (programData && programData.college) {
-        const college = programData.college;
-        if (!collegeStats[college]) {
-          collegeStats[college] = {
-            name: college,
-            programCount: 0,
-            programs: []
-          };
+    // Get chat history and analyze for program mentions
+    const chatsSnapshot = await admin.firestore().collection('chat_history').get();
+    const programCounts = {};
+    
+    chatsSnapshot.forEach(doc => {
+      const data = doc.data();
+      const message = data.message?.toLowerCase() || '';
+      
+      // Count mentions of each program
+      validPrograms.forEach(program => {
+        if (message.includes(program.toLowerCase())) {
+          programCounts[program] = (programCounts[program] || 0) + 1;
         }
-        collegeStats[college].programCount++;
-        collegeStats[college].programs.push({
-          name: programName,
-          cutoff: programData.cutoff
+      });
+    });
+    
+    // Sort by popularity
+    const popularPrograms = Object.entries(programCounts)
+      .sort(([,a], [,b]) => b - a)
+      .slice(0, parseInt(limit))
+      .map(([program, count]) => ({
+        program,
+        mentions: count,
+        percentage: ((count / chatsSnapshot.size) * 100).toFixed(1)
+      }));
+    
+    res.json({ popularPrograms });
+  } catch (error) {
+    console.error('Error fetching popular programs:', error);
+    res.status(500).json({ error: 'Failed to fetch popular programs' });
+  }
+});
+
+router.get('/api/analytics/usage', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { period = '30' } = req.query; // days
+    const daysAgo = new Date();
+    daysAgo.setDate(daysAgo.getDate() - parseInt(period));
+    
+    const chatsSnapshot = await admin.firestore()
+      .collection('chat_history')
+      .where('timestamp', '>=', daysAgo)
+      .orderBy('timestamp')
+      .get();
+    
+    // Group by day
+    const dailyUsage = {};
+    chatsSnapshot.forEach(doc => {
+      const data = doc.data();
+      const date = data.timestamp?.toDate?.()?.toISOString?.()?.split('T')[0] || 'unknown';
+      dailyUsage[date] = (dailyUsage[date] || 0) + 1;
+    });
+    
+    const usageData = Object.entries(dailyUsage)
+      .map(([date, count]) => ({ date, chats: count }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    
+    res.json({
+      period: parseInt(period),
+      totalChats: chatsSnapshot.size,
+      dailyUsage: usageData,
+      averageDaily: (chatsSnapshot.size / parseInt(period)).toFixed(1)
+    });
+  } catch (error) {
+    console.error('Error fetching usage analytics:', error);
+    res.status(500).json({ error: 'Failed to fetch usage analytics' });
+  }
+});
+
+// Chat monitoring
+router.get('/api/chats', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { page = 1, limit = 50, userId, search } = req.query;
+    const offset = (page - 1) * limit;
+    
+    let query = admin.firestore().collection('chat_history').orderBy('timestamp', 'desc');
+    
+    if (userId) {
+      query = query.where('uid', '==', userId);
+    }
+    
+    const snapshot = await query.limit(parseInt(limit)).offset(offset).get();
+    const chats = [];
+    
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      if (!search || data.message?.toLowerCase().includes(search.toLowerCase())) {
+        chats.push({
+          id: doc.id,
+          userId: data.uid,
+          message: data.message,
+          response: data.response,
+          timestamp: data.timestamp?.toDate?.()?.toISOString() || null
         });
       }
     });
-
-    // Sort programs in each college by cut-off
-    Object.values(collegeStats).forEach(college => {
-      college.programs.sort((a, b) => a.cutoff - b.cutoff);
-    });
-
-    const colleges = Object.values(collegeStats).sort((a, b) => a.name.localeCompare(b.name));
-
+    
     res.json({
-      colleges,
-      totalColleges: colleges.length,
-      totalPrograms: validPrograms.length
+      chats: search ? chats.filter(chat => 
+        chat.message?.toLowerCase().includes(search.toLowerCase())
+      ) : chats,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit)
+      }
     });
   } catch (error) {
-    console.error('Error fetching colleges:', error);
-    res.status(500).json({ error: 'Failed to fetch colleges' });
+    console.error('Error fetching chats:', error);
+    res.status(500).json({ error: 'Failed to fetch chats' });
   }
 });
 
-// Get programs for a specific college
-router.get('/colleges/:collegeName/programs', authenticateToken, async (req, res) => {
+router.get('/api/chats/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const { collegeName } = req.params;
-    const decodedCollegeName = decodeURIComponent(collegeName);
+    const { id } = req.params;
+    const chatDoc = await admin.firestore().collection('chat_history').doc(id).get();
     
-    const programs = validPrograms
-      .map(programName => {
-        const programData = getProgramData(programName);
-        return {
-          name: programName,
-          ...programData
-        };
-      })
-      .filter(program => 
-        program.college && 
-        program.college.toLowerCase().includes(decodedCollegeName.toLowerCase())
-      )
-      .sort((a, b) => a.cutoff - b.cutoff);
-
-    if (programs.length === 0) {
-      return res.status(404).json({ 
-        error: 'No programs found for this college',
-        collegeName: decodedCollegeName
-      });
+    if (!chatDoc.exists) {
+      return res.status(404).json({ error: 'Chat not found' });
     }
-
+    
+    const chatData = chatDoc.data();
     res.json({
-      college: decodedCollegeName,
-      programs,
-      totalPrograms: programs.length
+      id: chatDoc.id,
+      ...chatData,
+      timestamp: chatData.timestamp?.toDate?.()?.toISOString() || null
     });
   } catch (error) {
-    console.error('Error fetching college programs:', error);
-    res.status(500).json({ error: 'Failed to fetch college programs' });
+    console.error('Error fetching chat:', error);
+    res.status(500).json({ error: 'Failed to fetch chat' });
+  }
+});
+
+// System health check
+router.get('/api/system/health', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const health = {
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      services: {
+        firestore: 'healthy',
+        firebase_auth: 'healthy',
+        openai: process.env.OPENAI_API_KEY ? 'configured' : 'not_configured'
+      },
+      memory: {
+        used: process.memoryUsage().heapUsed / 1024 / 1024,
+        total: process.memoryUsage().heapTotal / 1024 / 1024
+      },
+      uptime: process.uptime()
+    };
+    
+    // Test Firestore connection
+    try {
+      await admin.firestore().collection('health_check').doc('test').set({ timestamp: new Date() });
+      await admin.firestore().collection('health_check').doc('test').delete();
+    } catch (firestoreError) {
+      health.services.firestore = 'error';
+      health.status = 'degraded';
+    }
+    
+    res.json(health);
+  } catch (error) {
+    console.error('Error getting system health:', error);
+    res.status(500).json({ 
+      status: 'error',
+      error: 'Failed to get system health' 
+    });
+  }
+});
+
+// Program management for admin
+router.put('/api/programs/:id', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, cutoff, college, requirements, fees } = req.body;
+    
+    // For now, return not implemented since programs are in data.js
+    // In future, move programs to Firestore for dynamic updates
+    res.status(501).json({ 
+      error: 'Program updates not implemented yet',
+      message: 'Programs are currently stored in data.js file. Future versions will support database updates.'
+    });
+  } catch (error) {
+    console.error('Error updating program:', error);
+    res.status(500).json({ error: 'Failed to update program' });
+  }
+});
+
+router.get('/api/users/:id/chat-history', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { page = 1, limit = 20 } = req.query;
+    const offset = (page - 1) * limit;
+    
+    const snapshot = await admin.firestore()
+      .collection('chat_history')
+      .where('uid', '==', id)
+      .orderBy('timestamp', 'desc')
+      .limit(parseInt(limit))
+      .offset(offset)
+      .get();
+    
+    const chats = [];
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      chats.push({
+        id: doc.id,
+        message: data.message,
+        response: data.response,
+        timestamp: data.timestamp?.toDate?.()?.toISOString() || null
+      });
+    });
+    
+    res.json({
+      chats,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit)
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching user chat history:', error);
+    res.status(500).json({ error: 'Failed to fetch user chat history' });
   }
 });
 
