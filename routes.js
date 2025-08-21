@@ -1417,7 +1417,7 @@ router.get('/api/users/:id/chat-history', authenticateToken, requireAdmin, async
 // USER DATA MANAGEMENT ENDPOINTS
 // =======================
 
-// Fix/migrate existing user data
+// Fix/migrate existing user data - Force deployment update
 router.post('/api/admin/users/fix-data', authenticateToken, requireAdmin, async (req, res) => {
   try {
     console.log('🔧 Starting user data migration...');
